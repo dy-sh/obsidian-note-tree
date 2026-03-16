@@ -2,50 +2,78 @@
 	max-height: 500px;
 	overflow-y: auto;
 	margin-bottom: 1em;
+	padding-right: 8px;
 }
 
-.moc-reorder-group {
-	margin-bottom: 12px;
-}
-
-.moc-reorder-group-header {
-	font-weight: 600;
-	padding: 4px 8px;
+/* Tree-style root header */
+.moc-reorder-tree-root {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 8px;
 	margin-bottom: 4px;
 	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.moc-reorder-tree-icon {
+	display: flex;
+	align-items: center;
 	color: var(--text-muted);
-	font-size: 0.9em;
+	flex-shrink: 0;
+}
+
+.moc-reorder-tree-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.moc-reorder-tree-root-label {
+	font-weight: 600;
+	font-size: 0.95em;
 }
 
 .moc-reorder-group-count {
 	font-weight: normal;
+	color: var(--text-faint);
+	font-size: 0.85em;
 }
 
-.moc-reorder-group-body {
-	min-height: 32px;
+/* Nested tree children container */
+.moc-reorder-tree-children {
+	min-height: 24px;
 	border-radius: 4px;
 	padding: 2px 0;
 }
 
-.moc-reorder-group-body.drag-over-group {
+.moc-reorder-tree-nested {
+	padding-left: 24px;
+	margin-left: 8px;
+	border-left: 1px solid var(--background-modifier-border);
+}
+
+.moc-reorder-tree-children.drag-over-group {
 	background: var(--background-modifier-hover);
 	outline: 2px dashed var(--interactive-accent);
 	outline-offset: -2px;
 }
 
+.moc-reorder-tree-node {
+	/* wrapper for item + its nested children */
+}
+
 .moc-reorder-empty {
-	padding: 8px;
-	text-align: center;
+	padding: 8px 8px 8px 16px;
 	color: var(--text-faint);
 	font-size: 0.85em;
+	font-style: italic;
 }
 
 .moc-reorder-item {
 	display: flex;
 	align-items: center;
-	padding: 6px 8px;
+	padding: 5px 8px;
 	border-radius: 4px;
-	margin-bottom: 2px;
+	margin-bottom: 1px;
 	cursor: default;
 	outline: none;
 }
@@ -53,6 +81,10 @@
 .moc-reorder-item:hover,
 .moc-reorder-item:focus {
 	background: var(--background-modifier-hover);
+}
+
+.moc-reorder-item.is-sub-moc {
+	font-weight: 500;
 }
 
 .moc-reorder-item.is-dragging {
@@ -67,12 +99,45 @@
 	border-bottom: 2px solid var(--interactive-accent);
 }
 
-.moc-reorder-grip {
-	cursor: grab;
-	margin-right: 8px;
-	color: var(--text-muted);
+.moc-reorder-item-icon {
 	display: flex;
 	align-items: center;
+	margin-right: 6px;
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.moc-reorder-item-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.moc-reorder-item.is-sub-moc .moc-reorder-item-icon {
+	color: var(--interactive-accent);
+}
+
+.moc-reorder-sub-count {
+	color: var(--text-faint);
+	font-size: 0.75em;
+	font-weight: normal;
+	margin-left: 6px;
+	background: var(--background-modifier-hover);
+	padding: 0 5px;
+	border-radius: 8px;
+	flex-shrink: 0;
+}
+
+.moc-reorder-grip {
+	cursor: grab;
+	margin-right: 4px;
+	color: var(--text-faint);
+	display: flex;
+	align-items: center;
+}
+
+.moc-reorder-grip svg {
+	width: 14px;
+	height: 14px;
 }
 
 .moc-reorder-label {

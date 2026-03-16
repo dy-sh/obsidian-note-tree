@@ -318,6 +318,8 @@ export class ReorderModal extends Modal {
 	private onSave: (groups: ReorderGroupData[]) => void;
 	private scrollEl: HTMLElement | null = null;
 	private dragSource: { groupIdx: number; itemIdx: number } | null = null;
+	// Maps sub-MOC file path -> group index for nested rendering
+	private subMocGroupMap = new Map<string, number>();
 
 	constructor(
 		app: App,
@@ -331,6 +333,16 @@ export class ReorderModal extends Modal {
 			items: [...g.items],
 		}));
 		this.onSave = onSave;
+
+		// Build sub-MOC lookup: which items in group 0 are also group parents?
+		this.rebuildSubMocMap();
+	}
+
+	private rebuildSubMocMap(): void {
+		this.subMocGroupMap.clear();
+		for (let i = 1; i < this.groups.length; i++) {
+			this.subMocGroupMap.set(this.groups[i].parent.path, i);
+		}
 	}
 
 	onOpen() {
@@ -429,163 +441,200 @@ export class ReorderModal extends Modal {
 	private renderAll() {
 		if (!this.scrollEl) return;
 		this.scrollEl.empty();
+		this.rebuildSubMocMap();
 
-		this.groups.forEach((group, groupIdx) => {
-			const groupEl = this.scrollEl!.createDiv({
-				cls: "moc-reorder-group",
+		// Render as a nested tree starting from the root group (index 0)
+		const rootGroup = this.groups[0];
+		if (!rootGroup) return;
+
+		// Root header
+		const rootHeader = this.scrollEl.createDiv({ cls: "moc-reorder-tree-root" });
+		const rootIcon = rootHeader.createSpan({ cls: "moc-reorder-tree-icon" });
+		setIcon(rootIcon, "folder-tree");
+		rootHeader.createSpan({
+			cls: "moc-reorder-tree-root-label",
+			text: rootGroup.label,
+		});
+		rootHeader.createSpan({
+			cls: "moc-reorder-group-count",
+			text: ` (${rootGroup.items.length})`,
+		});
+
+		// Root children container
+		const rootBody = this.scrollEl.createDiv({ cls: "moc-reorder-tree-children" });
+		this.renderGroupItems(rootBody, 0);
+	}
+
+	private renderGroupItems(container: HTMLElement, groupIdx: number): void {
+		const group = this.groups[groupIdx];
+		if (!group) return;
+
+		container.dataset.group = String(groupIdx);
+
+		if (group.items.length === 0) {
+			container.createDiv({
+				cls: "moc-reorder-empty",
+				text: "No children — drop items here",
+			});
+		}
+
+		// Drop on container body (for empty groups or dropping at end)
+		container.addEventListener("dragover", (e) => {
+			e.preventDefault();
+			if (!this.dragSource) return;
+			const target = e.target as HTMLElement;
+			if (!target.closest(".moc-reorder-item")) {
+				this.clearAllIndicators();
+				container.addClass("drag-over-group");
+			}
+		});
+
+		container.addEventListener("dragleave", (e) => {
+			if (!container.contains(e.relatedTarget as Node)) {
+				container.removeClass("drag-over-group");
+			}
+		});
+
+		container.addEventListener("drop", (e) => {
+			e.preventDefault();
+			const target = e.target as HTMLElement;
+			if (!target.closest(".moc-reorder-item")) {
+				this.clearAllIndicators();
+				this.handleDrop(groupIdx, group.items.length);
+			}
+		});
+
+		group.items.forEach((item, itemIdx) => {
+			const isSubMoc = this.subMocGroupMap.has(item.file.path);
+			const subGroupIdx = this.subMocGroupMap.get(item.file.path);
+
+			// Wrapper for item + its nested children
+			const nodeWrap = container.createDiv({ cls: "moc-reorder-tree-node" });
+
+			const row = nodeWrap.createDiv({
+				cls: "moc-reorder-item" + (isSubMoc ? " is-sub-moc" : ""),
+			});
+			row.setAttribute("tabindex", "0");
+			row.dataset.group = String(groupIdx);
+			row.dataset.index = String(itemIdx);
+			row.draggable = true;
+
+			// Grip
+			const grip = row.createSpan({ cls: "moc-reorder-grip" });
+			setIcon(grip, "grip-vertical");
+
+			// Icon for sub-MOCs vs leaf
+			const itemIcon = row.createSpan({ cls: "moc-reorder-item-icon" });
+			if (isSubMoc) {
+				setIcon(itemIcon, "folder");
+			} else {
+				setIcon(itemIcon, "file-text");
+			}
+
+			// Label
+			row.createSpan({
+				cls: "moc-reorder-label",
+				text: item.file.basename,
 			});
 
-			// Group header
-			const header = groupEl.createDiv({
-				cls: "moc-reorder-group-header",
-			});
-			header.createSpan({ text: group.label });
-			header.createSpan({
-				cls: "moc-reorder-group-count",
-				text: ` (${group.items.length})`,
-			});
-
-			// Group body = drop zone
-			const body = groupEl.createDiv({
-				cls: "moc-reorder-group-body",
-			});
-			body.dataset.group = String(groupIdx);
-
-			if (group.items.length === 0) {
-				body.createDiv({
-					cls: "moc-reorder-empty",
-					text: "Drop items here",
+			// Sub-MOC child count badge
+			if (isSubMoc && subGroupIdx !== undefined) {
+				const subGroup = this.groups[subGroupIdx];
+				row.createSpan({
+					cls: "moc-reorder-sub-count",
+					text: `${subGroup.items.length}`,
 				});
 			}
 
-			// Drop on group body (for empty groups or dropping at end)
-			body.addEventListener("dragover", (e) => {
-				e.preventDefault();
-				if (!this.dragSource) return;
-				// Only highlight group if not hovering over an item
-				const target = e.target as HTMLElement;
-				if (!target.closest(".moc-reorder-item")) {
-					this.clearAllIndicators();
-					body.addClass("drag-over-group");
+			// Actions
+			const actions = row.createSpan({ cls: "moc-reorder-actions" });
+
+			const btnUp = actions.createEl("button", {
+				cls: "moc-reorder-btn",
+			});
+			setIcon(btnUp, "arrow-up");
+			btnUp.addEventListener("click", (e) => {
+				e.stopPropagation();
+				if (itemIdx > 0) {
+					[group.items[itemIdx], group.items[itemIdx - 1]] = [
+						group.items[itemIdx - 1],
+						group.items[itemIdx],
+					];
+					this.renderAll();
+					this.focusItem(groupIdx, itemIdx - 1);
 				}
 			});
 
-			body.addEventListener("dragleave", (e) => {
-				if (!body.contains(e.relatedTarget as Node)) {
-					body.removeClass("drag-over-group");
+			const btnDown = actions.createEl("button", {
+				cls: "moc-reorder-btn",
+			});
+			setIcon(btnDown, "arrow-down");
+			btnDown.addEventListener("click", (e) => {
+				e.stopPropagation();
+				if (itemIdx < group.items.length - 1) {
+					[group.items[itemIdx], group.items[itemIdx + 1]] = [
+						group.items[itemIdx + 1],
+						group.items[itemIdx],
+					];
+					this.renderAll();
+					this.focusItem(groupIdx, itemIdx + 1);
 				}
 			});
 
-			body.addEventListener("drop", (e) => {
-				e.preventDefault();
+			// Drag start
+			row.addEventListener("dragstart", (e) => {
+				this.dragSource = { groupIdx, itemIdx };
+				row.addClass("is-dragging");
+				e.dataTransfer?.setData(
+					"text/plain",
+					`${groupIdx}:${itemIdx}`
+				);
+			});
+
+			row.addEventListener("dragend", () => {
+				this.dragSource = null;
+				row.removeClass("is-dragging");
 				this.clearAllIndicators();
-				// Only handle if not dropped on an item
-				const target = e.target as HTMLElement;
-				if (!target.closest(".moc-reorder-item")) {
-					this.handleDrop(groupIdx, group.items.length);
+			});
+
+			// Drag over item = position indicator
+			row.addEventListener("dragover", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.clearAllIndicators();
+				const rect = row.getBoundingClientRect();
+				const mid = rect.top + rect.height / 2;
+				if (e.clientY < mid) {
+					row.addClass("drag-over-above");
+				} else {
+					row.addClass("drag-over-below");
 				}
 			});
 
-			// Render items
-			group.items.forEach((item, itemIdx) => {
-				const row = body.createDiv({ cls: "moc-reorder-item" });
-				row.setAttribute("tabindex", "0");
-				row.dataset.group = String(groupIdx);
-				row.dataset.index = String(itemIdx);
-				row.draggable = true;
-
-				// Grip
-				const grip = row.createSpan({ cls: "moc-reorder-grip" });
-				setIcon(grip, "grip-vertical");
-
-				// Label
-				row.createSpan({
-					cls: "moc-reorder-label",
-					text: item.file.basename,
-				});
-
-				// Actions
-				const actions = row.createSpan({ cls: "moc-reorder-actions" });
-
-				const btnUp = actions.createEl("button", {
-					cls: "moc-reorder-btn",
-				});
-				setIcon(btnUp, "arrow-up");
-				btnUp.addEventListener("click", (e) => {
-					e.stopPropagation();
-					if (itemIdx > 0) {
-						[group.items[itemIdx], group.items[itemIdx - 1]] = [
-							group.items[itemIdx - 1],
-							group.items[itemIdx],
-						];
-						this.renderAll();
-						this.focusItem(groupIdx, itemIdx - 1);
-					}
-				});
-
-				const btnDown = actions.createEl("button", {
-					cls: "moc-reorder-btn",
-				});
-				setIcon(btnDown, "arrow-down");
-				btnDown.addEventListener("click", (e) => {
-					e.stopPropagation();
-					if (itemIdx < group.items.length - 1) {
-						[group.items[itemIdx], group.items[itemIdx + 1]] = [
-							group.items[itemIdx + 1],
-							group.items[itemIdx],
-						];
-						this.renderAll();
-						this.focusItem(groupIdx, itemIdx + 1);
-					}
-				});
-
-				// Drag start
-				row.addEventListener("dragstart", (e) => {
-					this.dragSource = { groupIdx, itemIdx };
-					row.addClass("is-dragging");
-					e.dataTransfer?.setData(
-						"text/plain",
-						`${groupIdx}:${itemIdx}`
-					);
-				});
-
-				row.addEventListener("dragend", () => {
-					this.dragSource = null;
-					row.removeClass("is-dragging");
-					this.clearAllIndicators();
-				});
-
-				// Drag over item = position indicator
-				row.addEventListener("dragover", (e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					this.clearAllIndicators();
-					const rect = row.getBoundingClientRect();
-					const mid = rect.top + rect.height / 2;
-					if (e.clientY < mid) {
-						row.addClass("drag-over-above");
-					} else {
-						row.addClass("drag-over-below");
-					}
-				});
-
-				row.addEventListener("dragleave", () => {
-					row.removeClass("drag-over-above");
-					row.removeClass("drag-over-below");
-				});
-
-				// Drop on item
-				row.addEventListener("drop", (e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					this.clearAllIndicators();
-					const rect = row.getBoundingClientRect();
-					const mid = rect.top + rect.height / 2;
-					const targetIdx =
-						e.clientY < mid ? itemIdx : itemIdx + 1;
-					this.handleDrop(groupIdx, targetIdx);
-				});
+			row.addEventListener("dragleave", () => {
+				row.removeClass("drag-over-above");
+				row.removeClass("drag-over-below");
 			});
+
+			// Drop on item
+			row.addEventListener("drop", (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.clearAllIndicators();
+				const rect = row.getBoundingClientRect();
+				const mid = rect.top + rect.height / 2;
+				const targetIdx =
+					e.clientY < mid ? itemIdx : itemIdx + 1;
+				this.handleDrop(groupIdx, targetIdx);
+			});
+
+			// Render nested children for sub-MOCs
+			if (isSubMoc && subGroupIdx !== undefined) {
+				const subChildren = nodeWrap.createDiv({
+					cls: "moc-reorder-tree-children moc-reorder-tree-nested",
+				});
+				this.renderGroupItems(subChildren, subGroupIdx);
+			}
 		});
 	}
 }
