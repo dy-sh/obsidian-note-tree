@@ -6,59 +6,32 @@ import {
 	PluginSettingTab,
 	Setting,
 	TFile,
-	SuggestModal,
 } from "obsidian";
 import { MocGeneratorSettings, DEFAULT_SETTINGS, MocParams, DEFAULT_NEW_NOTE_TEMPLATE } from "./types";
 import { MocEngine } from "./moc-engine";
-import { MocModeSuggestModal, ParentNoteSuggestModal, CreateNoteModal, NewNoteInfo, ReorderModal, ReorderGroupData, OrphanListModal, EditMocParamsModal } from "./modal";
-import { NoteTreeView, NOTE_TREE_VIEW_TYPE } from "./tree-view";
+import { MocModeSuggestModal, ParentNoteSuggestModal, CreateNoteModal, NewNoteInfo, ReorderModal, ReorderGroupData, OrphanListModal, EditMocParamsModal, FileSuggestModal, TextInputModal, BatchCreateModal } from "./modal";
+import { NoteTreeView, NOTE_TREE_VIEW_TYPE, TreeViewHost } from "./tree-view";
 
-class FileSuggestModal extends SuggestModal<TFile> {
-	private files: TFile[];
-	private onChooseCallback: (file: TFile) => void;
-
-	constructor(app: App, files: TFile[], placeholder: string, onChoose: (file: TFile) => void) {
-		super(app);
-		this.files = files;
-		this.onChooseCallback = onChoose;
-		this.setPlaceholder(placeholder);
-	}
-
-	getSuggestions(query: string): TFile[] {
-		if (!query) return this.files;
-		const lower = query.toLowerCase();
-		return this.files.filter((f) => f.basename.toLowerCase().includes(lower));
-	}
-
-	renderSuggestion(file: TFile, el: HTMLElement): void {
-		el.createEl("div", { text: file.basename });
-		el.createEl("small", { text: file.path });
-	}
-
-	onChooseSuggestion(file: TFile): void {
-		this.onChooseCallback(file);
-	}
-}
-
-export default class MocGeneratorPlugin extends Plugin {
+export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 	settings: MocGeneratorSettings = DEFAULT_SETTINGS;
 	engine: MocEngine = null as any;
 	private statusBarEl: HTMLElement | null = null;
 	private autoUpdateTimer: ReturnType<typeof setTimeout> | null = null;
 	private isUpdating = false;
+	private autoUpdateRef: ReturnType<typeof this.registerEvent> | null = null;
 
 	async onload() {
 		await this.loadSettings();
 		this.engine = new MocEngine(this.app, this.settings);
 
-		// 3c: cache invalidation on metadata change
+		// Cache invalidation on metadata change
 		this.registerEvent(
 			this.app.metadataCache.on("changed", () => {
 				this.engine.invalidateCache();
 			})
 		);
 
-		// 1b: auto-update on save
+		// Auto-update on save
 		this.setupAutoUpdate();
 
 		// Insert MOC at cursor (requires editor)
@@ -85,7 +58,7 @@ export default class MocGeneratorPlugin extends Plugin {
 			},
 		});
 
-		// 1c: one-click "Create MOC for current note" (appends to end)
+		// One-click "Create MOC for current note" (appends to end)
 		this.addCommand({
 			id: "create-moc",
 			name: "Create MOC for current note",
@@ -152,6 +125,15 @@ export default class MocGeneratorPlugin extends Plugin {
 			},
 		});
 
+		// #1: Quick-create child note (no modal)
+		this.addCommand({
+			id: "quick-create-child",
+			name: "Quick-create child note",
+			callback: () => {
+				this.quickCreateChildFlow();
+			},
+		});
+
 		// Reorder MOC children
 		this.addCommand({
 			id: "reorder-moc-children",
@@ -194,6 +176,37 @@ export default class MocGeneratorPlugin extends Plugin {
 				} else {
 					const root = chain[chain.length - 1];
 					await this.app.workspace.getLeaf(false).openFile(root);
+				}
+			},
+		});
+
+		// #8: Sibling navigation commands
+		this.addCommand({
+			id: "go-to-next-sibling",
+			name: "Go to next sibling",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No active file"); return; }
+				const { next } = await this.engine.getSiblings(file);
+				if (next) {
+					await this.app.workspace.getLeaf(false).openFile(next);
+				} else {
+					new Notice("No next sibling");
+				}
+			},
+		});
+
+		this.addCommand({
+			id: "go-to-prev-sibling",
+			name: "Go to previous sibling",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No active file"); return; }
+				const { prev } = await this.engine.getSiblings(file);
+				if (prev) {
+					await this.app.workspace.getLeaf(false).openFile(prev);
+				} else {
+					new Notice("No previous sibling");
 				}
 			},
 		});
@@ -245,16 +258,19 @@ export default class MocGeneratorPlugin extends Plugin {
 			},
 		});
 
-		// Find orphans
+		// Find orphans (with bulk assign support)
 		this.addCommand({
 			id: "find-orphans",
 			name: "Find orphan notes",
 			callback: async () => {
 				new Notice("Scanning for orphans...");
 				const orphans = await this.engine.findOrphans();
-				new OrphanListModal(this.app, orphans, (orphan) => {
-					this.assignParentToOrphan(orphan);
-				}).open();
+				new OrphanListModal(
+					this.app,
+					orphans,
+					(orphan) => this.assignParentToOrphan(orphan),
+					(selected) => this.bulkAssignParent(selected)
+				).open();
 			},
 		});
 
@@ -316,7 +332,75 @@ export default class MocGeneratorPlugin extends Plugin {
 			},
 		});
 
-		// 1c: context menu
+		// Reveal active file in tree
+		this.addCommand({
+			id: "reveal-in-tree",
+			name: "Reveal active file in tree",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No active file"); return; }
+				const leaves = this.app.workspace.getLeavesOfType(NOTE_TREE_VIEW_TYPE);
+				if (leaves.length === 0) {
+					await this.toggleTreeView();
+				}
+				const treeLeaves = this.app.workspace.getLeavesOfType(NOTE_TREE_VIEW_TYPE);
+				if (treeLeaves.length > 0) {
+					const view = treeLeaves[0].view as NoteTreeView;
+					await view.revealFile(file);
+				}
+			},
+		});
+
+		// Flatten branch — copy subtree as flat list
+		this.addCommand({
+			id: "flatten-branch",
+			name: "Copy branch as flat list",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No active file"); return; }
+				const descendants = await this.engine.getDescendantsFlat(file);
+				if (descendants.length === 0) {
+					new Notice("No descendants found");
+					return;
+				}
+				const lines = descendants.map((f) => `- [[${f.basename}]]`);
+				await navigator.clipboard.writeText(lines.join("\n"));
+				new Notice(`Copied ${lines.length} links to clipboard`);
+			},
+		});
+
+		// #7: Promote to MOC
+		this.addCommand({
+			id: "promote-to-moc",
+			name: "Promote to MOC",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No active file"); return; }
+				await this.promoteToMoc(file);
+			},
+		});
+
+		// #7: Demote from MOC
+		this.addCommand({
+			id: "demote-from-moc",
+			name: "Demote from MOC",
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) { new Notice("No active file"); return; }
+				await this.demoteFromMoc(file);
+			},
+		});
+
+		// #10: Batch create children
+		this.addCommand({
+			id: "batch-create-children",
+			name: "Batch create children",
+			callback: () => {
+				this.batchCreateChildrenFlow();
+			},
+		});
+
+		// Context menu
 		this.registerEvent(
 			this.app.workspace.on("file-menu", (menu, file) => {
 				if (file instanceof TFile && file.extension === "md") {
@@ -365,10 +449,10 @@ export default class MocGeneratorPlugin extends Plugin {
 			})
 		);
 
-		// Tree view registration
+		// Tree view registration — pass plugin as TreeViewHost
 		this.registerView(
 			NOTE_TREE_VIEW_TYPE,
-			(leaf) => new NoteTreeView(leaf, this.engine, this.settings)
+			(leaf) => new NoteTreeView(leaf, this)
 		);
 		this.addRibbonIcon("network", "Note Tree", () => {
 			this.toggleTreeView();
@@ -402,7 +486,7 @@ export default class MocGeneratorPlugin extends Plugin {
 			})
 		);
 
-		// 4d: ribbon icon
+		// Ribbon icon
 		this.addRibbonIcon("list-tree", "Create MOC", () => {
 			const file = this.app.workspace.getActiveFile();
 			if (!file) {
@@ -424,13 +508,88 @@ export default class MocGeneratorPlugin extends Plugin {
 			).open();
 		});
 
-		// 4c: status bar
+		// Status bar
 		this.statusBarEl = this.addStatusBarItem();
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => {
 				this.updateStatusBar();
 			})
 		);
+
+		// #2: Auto-detect/auto-assign parent for new notes created outside the plugin
+		this.registerEvent(
+			this.app.vault.on("create", (file) => {
+				if (!this.settings.autoDetectParent && !this.settings.autoAssignParent) return;
+				if (!(file instanceof TFile)) return;
+				if (file.extension !== "md") return;
+				// Delay to let metadata settle
+				setTimeout(async () => {
+					const parents = await this.engine.getParentFiles(file);
+					if (parents.length > 0) return; // already has a parent
+					const likelyParent = await this.engine.findLikelyParent(file);
+					if (!likelyParent) return;
+
+					if (this.settings.autoAssignParent) {
+						// Actually assign the parent
+						const upProp = this.settings.upProperties[0] || "up";
+						await this.app.fileManager.processFrontMatter(file, (fm: any) => {
+							fm[upProp] = `[[${likelyParent.basename}]]`;
+						});
+						this.engine.invalidateCache();
+						if (this.engine.checkTagExist(likelyParent, this.settings.mocTag)) {
+							await this.engine.updateMoc(likelyParent);
+						}
+						new Notice(
+							`Auto-assigned parent: ${likelyParent.basename}`,
+							5000
+						);
+					} else {
+						// Just suggest
+						new Notice(
+							`Suggested parent for "${file.basename}": ${likelyParent.basename}. Use "Move note to parent" to assign.`
+						);
+					}
+				}, 2000);
+			})
+		);
+
+		// Breadcrumb in reading mode
+		this.registerMarkdownPostProcessor(async (el, ctx) => {
+			const parent = el.parentElement;
+			if (!parent || parent.querySelector(".moc-reading-breadcrumb")) return;
+
+			const f = this.app.vault.getAbstractFileByPath(ctx.sourcePath);
+			if (!(f instanceof TFile)) return;
+
+			const chain = await this.engine.getAncestorChain(f);
+			if (chain.length === 0) return;
+
+			// Double-check after async
+			if (parent.querySelector(".moc-reading-breadcrumb")) return;
+
+			const breadcrumb = createDiv({ cls: "moc-reading-breadcrumb" });
+			const reversed = [...chain].reverse();
+			for (let i = 0; i < reversed.length; i++) {
+				if (i > 0) {
+					breadcrumb.createSpan({ cls: "moc-breadcrumb-separator", text: " > " });
+				}
+				const seg = breadcrumb.createSpan({
+					cls: "moc-breadcrumb-segment",
+					text: reversed[i].basename,
+				});
+				const target = reversed[i];
+				seg.addEventListener("click", () => {
+					this.app.workspace.getLeaf(false).openFile(target);
+				});
+			}
+			breadcrumb.createSpan({ cls: "moc-breadcrumb-separator", text: " > " });
+			breadcrumb.createSpan({
+				cls: "moc-breadcrumb-segment",
+				text: f.basename,
+			});
+
+			parent.insertBefore(breadcrumb, parent.firstChild);
+		});
 
 		this.addSettingTab(new MocGeneratorSettingTab(this.app, this));
 	}
@@ -451,13 +610,13 @@ export default class MocGeneratorPlugin extends Plugin {
 		if (chain.length === 0) {
 			const count = this.engine.getChildCount(file);
 			if (count !== null && count > 0) {
-				this.statusBarEl.textContent = `MOC: ${count} children`;
+				const stale = await this.engine.isMocStale(file);
+				this.statusBarEl.textContent = `MOC: ${count} children${stale ? " (outdated)" : ""}`;
 			}
 			return;
 		}
 
 		const breadcrumb = this.statusBarEl.createSpan({ cls: "moc-breadcrumb" });
-		// Show chain reversed: root > ... > parent > current
 		const reversed = [...chain].reverse();
 		for (let i = 0; i < reversed.length; i++) {
 			if (i > 0) {
@@ -472,7 +631,6 @@ export default class MocGeneratorPlugin extends Plugin {
 				this.app.workspace.getLeaf(false).openFile(targetFile);
 			});
 		}
-		// Current file at end
 		breadcrumb.createSpan({ cls: "moc-breadcrumb-separator", text: " > " });
 		breadcrumb.createSpan({
 			cls: "moc-breadcrumb-segment",
@@ -544,28 +702,9 @@ export default class MocGeneratorPlugin extends Plugin {
 							return;
 						}
 
-						const today = new Date().toISOString().slice(0, 10);
-						const upLine = parentFile
-							? `up:: [[${parentFile.basename}]]`
-							: "";
-						const heading = parentFile
-							? `${parentFile.basename} - ${info.name}`
-							: info.name;
-						const tagsLine = info.isMoc
-							? `tags: [${this.settings.mocTag}]`
-							: `tags: []`;
+						const newFile = await this.createNoteFromTemplate(info.name, parentFile, info.isMoc, info.priority, info.aliases);
+						if (!newFile) return;
 
-						const content = this.settings.newNoteTemplate
-							.replace(/\{\{date\}\}/g, today)
-							.replace(/\{\{parent\}\}/g, parentFile?.basename ?? "")
-							.replace(/\{\{name\}\}/g, info.name)
-							.replace(/\{\{aliases\}\}/g, info.aliases)
-							.replace(/\{\{priority\}\}/g, String(info.priority))
-							.replace(/\{\{up_line\}\}/g, upLine)
-							.replace(/\{\{heading\}\}/g, heading)
-							.replace(/\{\{tags_line\}\}/g, tagsLine);
-
-						const newFile = await this.app.vault.create(filePath, content);
 						await this.app.workspace.getLeaf(false).openFile(newFile);
 
 						// Auto-update parent MOC
@@ -579,6 +718,122 @@ export default class MocGeneratorPlugin extends Plugin {
 				).open();
 			}
 		).open();
+	}
+
+	// #1: Quick-create child note (no modal)
+	private async quickCreateChildFlow(): Promise<void> {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) { new Notice("No active file"); return; }
+
+		let parentFile: TFile | null = null;
+		if (this.engine.checkTagExist(activeFile, this.settings.mocTag)) {
+			parentFile = activeFile;
+		} else {
+			const parentMocs = await this.engine.getParentMocs(activeFile);
+			if (parentMocs.length > 0) {
+				parentFile = parentMocs[0];
+			}
+		}
+
+		if (!parentFile) {
+			new Notice("No parent MOC found. Open a MOC or a note with a parent MOC.");
+			return;
+		}
+
+		const finalParent = parentFile;
+		new TextInputModal(
+			this.app,
+			"Quick create child note",
+			"Note name",
+			async (name) => {
+				if (!name.trim()) {
+					new Notice("Note name cannot be empty");
+					return;
+				}
+
+				const maxPriority = await this.engine.getMaxChildPriority(finalParent);
+				const priority = maxPriority > 0 ? maxPriority + 10 : 10;
+
+				const newFile = await this.createNoteFromTemplate(name, finalParent, false, priority, "");
+				if (!newFile) return;
+
+				await this.app.workspace.getLeaf(false).openFile(newFile);
+
+				if (this.engine.checkTagExist(finalParent, this.settings.mocTag)) {
+					this.engine.invalidateCache();
+					await this.engine.updateMoc(finalParent);
+				}
+
+				new Notice("Created: " + name);
+			}
+		).open();
+	}
+
+	// #10: Batch create children flow (from command palette)
+	private async batchCreateChildrenFlow(): Promise<void> {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (!activeFile) { new Notice("No active file"); return; }
+
+		let parentFile: TFile | null = null;
+		if (this.engine.checkTagExist(activeFile, this.settings.mocTag)) {
+			parentFile = activeFile;
+		} else {
+			const parentMocs = await this.engine.getParentMocs(activeFile);
+			if (parentMocs.length > 0) {
+				parentFile = parentMocs[0];
+			}
+		}
+
+		if (!parentFile) {
+			new Notice("No parent MOC found");
+			return;
+		}
+
+		this.batchCreateChildren(parentFile);
+	}
+
+	// Shared helper to create a note from template
+	private async createNoteFromTemplate(
+		name: string,
+		parentFile: TFile | null,
+		isMoc: boolean,
+		priority: number,
+		aliases: string
+	): Promise<TFile | null> {
+		const parentDir = parentFile
+			? (parentFile.parent?.path ?? "")
+			: (this.app.workspace.getActiveFile()?.parent?.path ?? "");
+		const filePath = parentDir
+			? `${parentDir}/${name}.md`
+			: `${name}.md`;
+
+		if (this.app.vault.getAbstractFileByPath(filePath)) {
+			new Notice("File already exists: " + filePath);
+			return null;
+		}
+
+		const today = new Date().toISOString().slice(0, 10);
+		const upLine = parentFile
+			? `up:: [[${parentFile.basename}]]`
+			: "";
+		const heading = parentFile
+			? `${parentFile.basename} - ${name}`
+			: name;
+		const tagsLine = isMoc
+			? `tags: [${this.settings.mocTag}]`
+			: `tags: []`;
+
+		const content = this.settings.newNoteTemplate
+			.replace(/\{\{date\}\}/g, today)
+			.replace(/\{\{parent\}\}/g, parentFile?.basename ?? "")
+			.replace(/\{\{name\}\}/g, name)
+			.replace(/\{\{aliases\}\}/g, aliases)
+			.replace(/\{\{priority\}\}/g, String(priority))
+			.replace(/\{\{up_line\}\}/g, upLine)
+			.replace(/\{\{heading\}\}/g, heading)
+			.replace(/\{\{tags_line\}\}/g, tagsLine);
+
+		return await this.app.vault.create(filePath, content);
 	}
 
 	private async reorderMocChildrenFlow(): Promise<void> {
@@ -676,12 +931,11 @@ export default class MocGeneratorPlugin extends Plugin {
 		}).open();
 	}
 
-	// 1b: smart auto-update — only update parent MOCs of modified file
+	// Smart auto-update
 	private setupAutoUpdate(): void {
-		if (!this.settings.autoUpdateOnSave) return;
-
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
+				if (!this.settings.autoUpdateOnSave) return;
 				if (this.isUpdating) return;
 				if (!(file instanceof TFile)) return;
 				if (this.autoUpdateTimer) clearTimeout(this.autoUpdateTimer);
@@ -691,13 +945,17 @@ export default class MocGeneratorPlugin extends Plugin {
 						this.engine.invalidateCache();
 						// If the modified file is a MOC, update it
 						if (this.engine.checkTagExist(file, this.settings.mocTag)) {
-							await this.engine.updateMoc(file);
+							if (!this.engine.isAutoUpdateDisabled(file)) {
+								await this.engine.updateMoc(file);
+							}
 						}
 						// Update parent MOCs of the modified file
 						const parents = await this.engine.getParentFiles(file);
 						for (const parent of parents) {
 							if (this.engine.checkTagExist(parent, this.settings.mocTag)) {
-								await this.engine.updateMoc(parent);
+								if (!this.engine.isAutoUpdateDisabled(parent)) {
+									await this.engine.updateMoc(parent);
+								}
 							}
 						}
 					} finally {
@@ -719,6 +977,144 @@ export default class MocGeneratorPlugin extends Plugin {
 				this.app.workspace.revealLeaf(leaf);
 			}
 		}
+	}
+
+	// TreeViewHost: create child note under a parent
+	createChildNote(parentFile: TFile): void {
+		const computeAndCreate = async () => {
+			let defaultPriority = this.settings.newNoteDefaultPriority;
+			const maxPriority = await this.engine.getMaxChildPriority(parentFile);
+			defaultPriority = maxPriority > 0 ? maxPriority + 10 : 10;
+
+			new CreateNoteModal(
+				this.app,
+				defaultPriority,
+				async (info: NewNoteInfo) => {
+					if (!info.name.trim()) {
+						new Notice("Note name cannot be empty");
+						return;
+					}
+
+					const newFile = await this.createNoteFromTemplate(
+						info.name, parentFile, info.isMoc, info.priority, info.aliases
+					);
+					if (!newFile) return;
+
+					await this.app.workspace.getLeaf(false).openFile(newFile);
+
+					if (this.engine.checkTagExist(parentFile, this.settings.mocTag)) {
+						this.engine.invalidateCache();
+						await this.engine.updateMoc(parentFile);
+					}
+
+					new Notice("Created: " + info.name);
+				}
+			).open();
+		};
+		computeAndCreate();
+	}
+
+	// TreeViewHost: add existing note as child
+	addExistingChildToParent(parentFile: TFile): void {
+		const allFiles = this.app.vault.getMarkdownFiles()
+			.filter((f) => f.path !== parentFile.path)
+			.sort((a, b) => a.basename.localeCompare(b.basename));
+
+		new FileSuggestModal(this.app, allFiles, "Select note to add as child", async (file) => {
+			const upProp = this.settings.upProperties[0] || "up";
+			const existingParents = await this.engine.getParentFiles(file);
+
+			if (existingParents.length > 0) {
+				// Replace first parent
+				await this.engine.updateNoteParent(file, existingParents[0], parentFile);
+			} else {
+				await this.app.fileManager.processFrontMatter(file, (fm: any) => {
+					fm[upProp] = `[[${parentFile.basename}]]`;
+				});
+			}
+
+			this.engine.invalidateCache();
+			if (this.engine.checkTagExist(parentFile, this.settings.mocTag)) {
+				await this.engine.updateMoc(parentFile);
+			}
+			new Notice(`Added ${file.basename} under ${parentFile.basename}`);
+		}).open();
+	}
+
+	// #4: TreeViewHost: update MOC
+	async updateMoc(file: TFile): Promise<void> {
+		await this.engine.updateMoc(file);
+		new Notice("MOC updated: " + file.basename);
+	}
+
+	// #7: TreeViewHost: promote to MOC
+	async promoteToMoc(file: TFile): Promise<void> {
+		await this.engine.addMocTag(file);
+		await this.engine.updateMoc(file);
+		this.engine.invalidateCache();
+		new Notice("Promoted to MOC: " + file.basename);
+	}
+
+	// #7: TreeViewHost: demote from MOC
+	async demoteFromMoc(file: TFile): Promise<void> {
+		await this.engine.removeMocTag(file);
+		await this.engine.removeMocMarkers(file);
+		this.engine.invalidateCache();
+		new Notice("Demoted from MOC: " + file.basename);
+	}
+
+	// #10: TreeViewHost: batch create children
+	batchCreateChildren(parentFile: TFile): void {
+		new BatchCreateModal(this.app, async (result) => {
+			let created = 0;
+			const maxPriority = await this.engine.getMaxChildPriority(parentFile);
+			let priority = maxPriority > 0 ? maxPriority + 10 : 10;
+
+			for (const name of result.names) {
+				const newFile = await this.createNoteFromTemplate(
+					name, parentFile, result.isMoc, priority, ""
+				);
+				if (newFile) {
+					created++;
+					priority += 10;
+				}
+			}
+
+			if (created > 0) {
+				this.engine.invalidateCache();
+				if (this.engine.checkTagExist(parentFile, this.settings.mocTag)) {
+					await this.engine.updateMoc(parentFile);
+				}
+			}
+
+			new Notice(`Created ${created} notes under ${parentFile.basename}`);
+		}).open();
+	}
+
+	// Bulk assign parent to multiple orphans
+	private async bulkAssignParent(orphans: TFile[]): Promise<void> {
+		const allFiles = this.app.vault.getMarkdownFiles();
+		const mocFiles = allFiles.filter((f) => this.engine.checkTagExist(f, this.settings.mocTag));
+		const otherFiles = allFiles.filter((f) => !this.engine.checkTagExist(f, this.settings.mocTag));
+		mocFiles.sort((a, b) => a.basename.localeCompare(b.basename));
+		otherFiles.sort((a, b) => a.basename.localeCompare(b.basename));
+
+		new ParentNoteSuggestModal(this.app, mocFiles, otherFiles, null, async (newParent) => {
+			if (!newParent) return;
+			const upProp = this.settings.upProperties[0] || "up";
+
+			for (const orphan of orphans) {
+				await this.app.fileManager.processFrontMatter(orphan, (fm: any) => {
+					fm[upProp] = `[[${newParent.basename}]]`;
+				});
+			}
+
+			this.engine.invalidateCache();
+			if (this.engine.checkTagExist(newParent, this.settings.mocTag)) {
+				await this.engine.updateMoc(newParent);
+			}
+			new Notice(`Assigned ${orphans.length} notes to ${newParent.basename}`);
+		}).open();
 	}
 
 	private async assignParentToOrphan(orphan: TFile): Promise<void> {
@@ -784,7 +1180,7 @@ class MocGeneratorSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("h2", { text: "MOC Generator Settings" });
 
-		// 2a: multiple parent properties
+		// Multiple parent properties
 		new Setting(containerEl)
 			.setName("Parent properties")
 			.setDesc(
@@ -874,7 +1270,7 @@ class MocGeneratorSettingTab extends PluginSettingTab {
 					})
 			);
 
-		// 2d: custom sorting
+		// Custom sorting
 		new Setting(containerEl)
 			.setName("Default sort")
 			.setDesc("Default sorting for MOC entries")
@@ -951,11 +1347,11 @@ class MocGeneratorSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("h3", { text: "Automation" });
 
-		// 1b: auto-update
+		// Auto-update on save
 		new Setting(containerEl)
 			.setName("Auto-update on save")
 			.setDesc(
-				"Automatically update all MOCs when any file is modified (with debouncing). Requires plugin reload after changing."
+				"Automatically update MOCs when files are modified (with debouncing). Respects per-note moc-auto-update: false in frontmatter."
 			)
 			.addToggle((toggle) =>
 				toggle
@@ -963,9 +1359,72 @@ class MocGeneratorSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.autoUpdateOnSave = value;
 						await this.plugin.saveSettings();
-						new Notice(
-							"Reload the plugin for auto-update changes to take effect"
-						);
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-update debounce (ms)")
+			.setDesc("Delay before auto-update triggers after a file change")
+			.addText((text) =>
+				text
+					.setPlaceholder("2000")
+					.setValue(String(this.plugin.settings.autoUpdateDebounceMs))
+					.onChange(async (value) => {
+						this.plugin.settings.autoUpdateDebounceMs = parseInt(value) || 2000;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-detect parent for new notes")
+			.setDesc("Suggest a parent based on folder or links when a note is created outside the plugin")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoDetectParent)
+					.onChange(async (value) => {
+						this.plugin.settings.autoDetectParent = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// #2: Auto-assign parent setting
+		new Setting(containerEl)
+			.setName("Auto-assign parent for new notes")
+			.setDesc("Automatically assign the detected parent (not just suggest). Overrides auto-detect when enabled.")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoAssignParent)
+					.onChange(async (value) => {
+						this.plugin.settings.autoAssignParent = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		containerEl.createEl("h3", { text: "Tree View" });
+
+		new Setting(containerEl)
+			.setName("Auto-reveal active file")
+			.setDesc("Automatically reveal and highlight the active file in the tree sidebar")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoRevealInTree)
+					.onChange(async (value) => {
+						this.plugin.settings.autoRevealInTree = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// #9: Recently modified indicator hours
+		new Setting(containerEl)
+			.setName("Recently modified threshold (hours)")
+			.setDesc("Notes modified within this many hours show a blue dot in the tree")
+			.addText((text) =>
+				text
+					.setPlaceholder("24")
+					.setValue(String(this.plugin.settings.recentModifiedHours))
+					.onChange(async (value) => {
+						this.plugin.settings.recentModifiedHours = parseInt(value) || 24;
+						await this.plugin.saveSettings();
 					})
 			);
 	}

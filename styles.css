@@ -133,6 +133,53 @@
 	padding: 8px;
 }
 
+/* Search/filter */
+.tree-search-wrap {
+	margin-bottom: 8px;
+}
+
+.tree-search-input {
+	width: 100%;
+	padding: 4px 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 0.85em;
+}
+
+.tree-search-input:focus {
+	border-color: var(--interactive-accent);
+	outline: none;
+}
+
+/* #5: Collapse/Expand all toolbar */
+.tree-toolbar {
+	display: flex;
+	gap: 4px;
+	margin-top: 4px;
+}
+
+.tree-toolbar-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 4px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+}
+
+.tree-toolbar-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.tree-container {
+	/* scrollable tree area */
+}
+
 .tree-node {
 	user-select: none;
 }
@@ -143,10 +190,16 @@
 	padding: 2px 4px;
 	border-radius: 4px;
 	cursor: pointer;
+	outline: none;
 }
 
 .tree-node-header:hover {
 	background: var(--background-modifier-hover);
+}
+
+.tree-node-header:focus {
+	background: var(--background-modifier-hover);
+	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .tree-node-icon {
@@ -166,6 +219,159 @@
 	font-size: 0.9em;
 }
 
+/* Search match highlight */
+.tree-node-match {
+	color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+/* #3: Child count badge */
+.tree-node-count {
+	color: var(--text-faint);
+	font-size: 0.75em;
+	margin-left: 4px;
+	flex-shrink: 0;
+}
+
+/* #11: Multi-parent indicator */
+.tree-node-multi-parent {
+	color: var(--text-faint);
+	font-size: 0.7em;
+	margin-left: 4px;
+	background: var(--background-modifier-hover);
+	padding: 0 4px;
+	border-radius: 8px;
+	flex-shrink: 0;
+}
+
+/* Stale MOC indicator */
+.tree-node-stale {
+	display: flex;
+	align-items: center;
+	margin-left: 4px;
+	color: var(--text-warning);
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+}
+
+.tree-node-stale svg {
+	width: 14px;
+	height: 14px;
+}
+
+/* #9: Recently modified indicator */
+.tree-node-recent {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--interactive-accent);
+	margin-left: 4px;
+	flex-shrink: 0;
+}
+
+/* Highlight for reveal */
+.tree-node-highlighted {
+	background: var(--background-modifier-hover);
+	animation: tree-highlight-fade 2s ease-out;
+}
+
+@keyframes tree-highlight-fade {
+	0% { background: var(--interactive-accent); opacity: 0.3; }
+	100% { background: transparent; opacity: 1; }
+}
+
+/* Drag-and-drop */
+.tree-node-header.is-dragging {
+	opacity: 0.4;
+}
+
+.tree-node-header.tree-drop-target {
+	background: var(--background-modifier-hover);
+	outline: 2px dashed var(--interactive-accent);
+	outline-offset: -2px;
+	border-radius: 4px;
+}
+
+/* #13: Sibling reorder drop indicators */
+.tree-node-header.tree-drop-above {
+	border-top: 2px solid var(--interactive-accent);
+}
+
+.tree-node-header.tree-drop-below {
+	border-bottom: 2px solid var(--interactive-accent);
+}
+
 .tree-node-children {
 	padding-left: 16px;
+}
+
+/* #12: Inline rename input */
+.tree-rename-input {
+	width: 100%;
+	padding: 0 2px;
+	border: 1px solid var(--interactive-accent);
+	border-radius: 2px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: inherit;
+	outline: none;
+}
+
+/* #14: Dashboard / stats */
+.tree-stats {
+	margin-bottom: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.tree-stats-header {
+	cursor: pointer;
+	font-size: 0.8em;
+	color: var(--text-muted);
+	padding: 4px 0;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.tree-stats-header:hover {
+	color: var(--text-normal);
+}
+
+.tree-stats-chevron {
+	display: flex;
+	align-items: center;
+	width: 14px;
+	height: 14px;
+}
+
+.tree-stats-chevron svg {
+	width: 14px;
+	height: 14px;
+}
+
+.tree-stats-body {
+	font-size: 0.8em;
+	padding: 4px 0;
+}
+
+.tree-stats-row {
+	display: flex;
+	justify-content: space-between;
+	padding: 2px 0;
+}
+
+.tree-stats-value {
+	font-weight: 600;
+}
+
+/* Reading mode breadcrumb */
+.moc-reading-breadcrumb {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 2px;
+	padding: 4px 0 8px;
+	margin-bottom: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
 }

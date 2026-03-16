@@ -367,7 +367,7 @@ export class MocEngine {
 		return `%% START MOC ${paramStr} [[${fileName}]] %%\n\n${mocText}\n%% END MOC %%`;
 	}
 
-	private async addMocTag(file: TFile): Promise<void> {
+	async addMocTag(file: TFile): Promise<void> {
 		await this.app.fileManager.processFrontMatter(file, (fm: any) => {
 			if (!fm.tags) {
 				fm.tags = [];
@@ -683,6 +683,187 @@ export class MocEngine {
 			});
 		}
 		this.invalidateCache();
+	}
+
+	// 2.3: Check if a MOC's marker content is stale compared to current index
+	async isMocStale(file: TFile): Promise<boolean> {
+		if (!this.checkTagExist(file, this.settings.mocTag)) return false;
+
+		const content = await this.app.vault.cachedRead(file);
+		const regex = /%% START MOC (.+?) \[\[(.*?)\]\] %%\n([\s\S]*?)\n%% END MOC %%/g;
+		const matches = [...content.matchAll(regex)];
+		if (matches.length === 0) return false;
+
+		const index = await this.buildChildrenIndex();
+
+		for (const match of matches) {
+			const rawParams = match[1];
+			const noteName = match[2];
+			const params = this.parseMarkerParams(rawParams);
+
+			const noteFile = this.app.metadataCache.getFirstLinkpathDest(noteName, file.path);
+			if (!noteFile) continue;
+
+			const notes = await this.generateNotes(noteFile, params, index);
+			const expected = this.makeMoc(notes, params);
+			const actual = match[3];
+
+			if (expected.trim() !== actual.trim()) return true;
+		}
+		return false;
+	}
+
+	// 4.2: Find likely parent for a new file based on folder/links
+	async findLikelyParent(file: TFile): Promise<TFile | null> {
+		// Strategy 1: Check if the file's folder matches a MOC's folder
+		const folder = file.parent?.path ?? "";
+		const allFiles = this.app.vault.getMarkdownFiles();
+
+		for (const f of allFiles) {
+			if (f.path === file.path) continue;
+			if (!this.checkTagExist(f, this.settings.mocTag)) continue;
+			if (f.parent?.path === folder) return f;
+		}
+
+		// Strategy 2: Check if any outgoing links point to a MOC
+		const cache = this.app.metadataCache.getFileCache(file);
+		if (cache?.links) {
+			for (const link of cache.links) {
+				const target = this.app.metadataCache.getFirstLinkpathDest(link.link, file.path);
+				if (target && this.checkTagExist(target, this.settings.mocTag)) {
+					return target;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	// Get all descendants as a flat list
+	async getDescendantsFlat(file: TFile): Promise<TFile[]> {
+		const index = await this.buildChildrenIndex();
+		const result: TFile[] = [];
+		const visited = new Set<string>();
+		visited.add(file.path);
+
+		const collect = (parentPath: string) => {
+			const children = index.get(parentPath) ?? [];
+			for (const child of children) {
+				if (visited.has(child.file.path)) continue;
+				visited.add(child.file.path);
+				result.push(child.file);
+				collect(child.file.path);
+			}
+		};
+
+		collect(file.path);
+		return result;
+	}
+
+	// 1.3: Check if a file has moc-auto-update disabled in frontmatter
+	isAutoUpdateDisabled(file: TFile): boolean {
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
+		return fm?.["moc-auto-update"] === false;
+	}
+
+	async removeMocTag(file: TFile): Promise<void> {
+		await this.app.fileManager.processFrontMatter(file, (fm: any) => {
+			if (Array.isArray(fm.tags)) {
+				fm.tags = fm.tags.filter((t: string) => t !== this.settings.mocTag);
+			}
+		});
+	}
+
+	async removeMocMarkers(file: TFile): Promise<void> {
+		let content = await this.app.vault.read(file);
+		content = content.replace(/%% START MOC .+? \[\[.*?\]\] %%\n[\s\S]*?\n%% END MOC %%\n?/g, "");
+		await this.app.vault.modify(file, content.trimEnd() + "\n");
+	}
+
+	async getSiblings(file: TFile): Promise<{ prev: TFile | null; next: TFile | null }> {
+		const parents = await this.getParentFiles(file);
+		if (parents.length === 0) return { prev: null, next: null };
+		const children = await this.getDirectChildren(parents[0]);
+		const idx = children.findIndex(c => c.file.path === file.path);
+		return {
+			prev: idx > 0 ? children[idx - 1].file : null,
+			next: idx < children.length - 1 ? children[idx + 1].file : null,
+		};
+	}
+
+	getParentCountFromCache(filePath: string): number {
+		if (!this.cachedIndex) return 0;
+		let count = 0;
+		for (const children of this.cachedIndex.values()) {
+			if (children.some(c => c.file.path === filePath)) count++;
+		}
+		return count;
+	}
+
+	async getStats(): Promise<{
+		totalNotes: number;
+		totalMocs: number;
+		orphanCount: number;
+		staleMocCount: number;
+		maxDepth: number;
+		largestMoc: { file: TFile; count: number } | null;
+	}> {
+		const allFiles = this.app.vault.getMarkdownFiles();
+		const index = await this.buildChildrenIndex();
+
+		let totalMocs = 0;
+		let orphanCount = 0;
+		let staleMocCount = 0;
+		let largestMoc: { file: TFile; count: number } | null = null;
+
+		for (const file of allFiles) {
+			const isMoc = this.checkTagExist(file, this.settings.mocTag);
+			if (isMoc) {
+				totalMocs++;
+				const children = index.get(file.path) ?? [];
+				if (!largestMoc || children.length > largestMoc.count) {
+					largestMoc = { file, count: children.length };
+				}
+				const stale = await this.isMocStale(file);
+				if (stale) staleMocCount++;
+			} else {
+				const parents = await this.getParentFiles(file);
+				if (parents.length === 0) orphanCount++;
+			}
+		}
+
+		// Compute max depth
+		let maxDepth = 0;
+		const computeDepth = async (file: TFile, visited: Set<string>): Promise<number> => {
+			const children = index.get(file.path) ?? [];
+			let max = 0;
+			for (const child of children) {
+				if (visited.has(child.file.path)) continue;
+				visited.add(child.file.path);
+				const d = await computeDepth(child.file, visited);
+				if (d > max) max = d;
+			}
+			return max + (children.length > 0 ? 1 : 0);
+		};
+
+		// Only compute from roots to avoid redundancy
+		for (const file of allFiles) {
+			if (!this.checkTagExist(file, this.settings.mocTag)) continue;
+			const parents = await this.getParentFiles(file);
+			if (parents.length === 0) {
+				const d = await computeDepth(file, new Set([file.path]));
+				if (d > maxDepth) maxDepth = d;
+			}
+		}
+
+		return {
+			totalNotes: allFiles.length,
+			totalMocs,
+			orphanCount,
+			staleMocCount,
+			maxDepth,
+			largestMoc,
+		};
 	}
 
 	async updateNoteParent(note: TFile, oldParent: TFile, newParent: TFile): Promise<void> {

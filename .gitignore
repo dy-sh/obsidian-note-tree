@@ -10,4 +10,9 @@ package-lock.json
 # build
 main.js
 *.js.map
+
+# Obsidian plugin data (user settings)
 data.json
+
+# OS
+.DS_Store

@@ -41,6 +41,10 @@ export interface MocGeneratorSettings {
 	autoUpdateDebounceMs: number;
 	newNoteTemplate: string;
 	newNoteDefaultPriority: number;
+	autoRevealInTree: boolean;
+	autoDetectParent: boolean;
+	autoAssignParent: boolean;
+	recentModifiedHours: number;
 }
 
 export const DEFAULT_NEW_NOTE_TEMPLATE = `---
@@ -69,6 +73,10 @@ export const DEFAULT_SETTINGS: MocGeneratorSettings = {
 	autoUpdateDebounceMs: 2000,
 	newNoteTemplate: DEFAULT_NEW_NOTE_TEMPLATE,
 	newNoteDefaultPriority: 100,
+	autoRevealInTree: false,
+	autoDetectParent: false,
+	autoAssignParent: false,
+	recentModifiedHours: 24,
 };
 
 export interface NoteInfo {

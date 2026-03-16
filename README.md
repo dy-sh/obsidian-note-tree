@@ -28,22 +28,51 @@ Each MOC auto-generates its own child list. You never maintain these lists by ha
 
 ## Features
 
+### Core
 - **Structured hierarchy** — every note links to its parent via `up`, forming a navigable tree
 - **Auto-generated MOC** — child lists are built automatically by traversing `up` links
 - **Create notes in context** — new notes are placed under the right parent with the correct `up` link
-- **Visual reorder** — drag-and-drop modal to reorder children and move notes between sub-categories
 - **Multiple MOC modes** — list (nested bullets), embedded (full note content), folder-based, tag-based
 - **Recursive traversal** — MOC can show children, grandchildren, and deeper, with configurable depth
 - **In-place updates** — MOC content regenerates inside marker comments without touching your own text
 - **Flexible sorting** — by priority, alphabetical, created/modified date, or custom field
 - **Filtering** — include/exclude notes by tags
 - **Auto-update** — MOCs update automatically when notes are created, deleted, renamed, or modified
-- **Go to parent / Go to root** — instant navigation up the hierarchy
-- **Breadcrumb status bar** — clickable path showing your position in the tree (root > ... > parent > current)
-- **Move note to parent** — reassign a note to a different parent with automatic MOC updates
-- **Orphan detection** — find notes that aren't connected to the tree and assign them parents
 - **Edit MOC parameters** — visual editor for marker parameters (mode, depth, sort, filters)
-- **Tree sidebar** — collapsible tree view of your entire note hierarchy in a sidebar panel
+
+### Navigation
+- **Go to parent / Go to root** — instant navigation up the hierarchy
+- **Sibling navigation** — jump to the next or previous sibling note within the same parent
+- **Breadcrumb status bar** — clickable path showing your position in the tree (root > ... > parent > current)
+- **Breadcrumb in reading mode** — breadcrumb trail rendered above note content
+
+### Tree Sidebar
+- **Collapsible tree view** — your entire note hierarchy in a sidebar panel
+- **Search/filter** — type to filter nodes by name, with ancestor paths preserved
+- **Collapse/Expand all** — toolbar buttons to collapse or expand the entire tree at once
+- **Child count badges** — each parent node shows the number of direct children
+- **Multi-parent indicator** — notes appearing under multiple parents show a `+N` badge with tooltip
+- **Recently modified indicator** — blue dot on notes modified within a configurable time window (default 24h)
+- **Stale MOC indicator** — warning icon on MOCs whose generated content is out of date
+- **File path tooltip** — hover any node to see its full vault path
+- **Keyboard navigation** — arrow keys to move, Enter to open, `n` to create child, F2 to rename
+- **Inline rename** — double-click a node label or press F2 to rename the file in place
+- **Drag-and-drop reparenting** — drag a node onto another to change its parent
+- **Drag-and-drop reordering** — drag a node above or below a sibling to reorder (adjusts priority)
+- **Context menu** — right-click for actions: open in new tab, create child, add existing child, update MOC, batch create, promote/demote MOC
+- **Auto-reveal** — optionally highlights the active file in the tree when you switch notes
+- **Dashboard/stats** — collapsible stats section at the top showing total notes, MOCs, orphans, stale MOCs, max depth, and largest MOC
+
+### Note Management
+- **Quick-create child** — single-input command that auto-resolves the parent from context and uses all defaults
+- **Batch create children** — create multiple child notes at once from a list of names
+- **Move note to parent** — reassign a note to a different parent with automatic MOC updates
+- **Promote to MOC** — add the MOC tag and generate an initial child list for any note
+- **Demote from MOC** — remove the MOC tag and all marker blocks from a note
+- **Orphan detection** — find notes that aren't connected to the tree, with bulk-assign support
+- **Visual reorder** — drag-and-drop modal to reorder children and move notes between sub-categories
+- **Auto-assign parent** — optionally auto-assign a detected parent to new notes (not just suggest)
+- **Copy branch as flat list** — copy an entire subtree as a flat bullet list to clipboard
 
 ## Commands
 
@@ -54,13 +83,21 @@ Each MOC auto-generates its own child list. You never maintain these lists by ha
 | **Update MOC** | Regenerate MOC markers in the current file |
 | **Update All MOCs** | Regenerate all MOC files in the vault |
 | **Create new note** | Create a child note under a selected parent with the right `up` link |
+| **Quick-create child note** | Create a child note with a single name input — auto-resolves parent from context |
+| **Batch create children** | Create multiple child notes at once from a multi-line list |
 | **Reorder MOC children** | Open a visual modal to reorder children and move them between sub-categories |
 | **Go to parent** | Navigate to the parent note (shows picker if multiple parents) |
 | **Go to root** | Navigate to the topmost ancestor in the hierarchy |
+| **Go to next sibling** | Navigate to the next sibling within the same parent |
+| **Go to previous sibling** | Navigate to the previous sibling within the same parent |
 | **Move note to parent** | Reassign the current note to a different parent, updating `up` link and both MOCs |
+| **Promote to MOC** | Add the MOC tag and generate a child list for the current note |
+| **Demote from MOC** | Remove the MOC tag and all marker blocks from the current note |
 | **Find orphan notes** | List all notes without an `up` link (excluding MOC roots), with option to assign parents |
 | **Edit MOC parameters** | Visual editor for the MOC marker block under the cursor |
+| **Copy branch as flat list** | Copy the entire subtree of the current note as a flat bullet list |
 | **Toggle Note Tree sidebar** | Show/hide the tree view panel in the left sidebar |
+| **Reveal active file in tree** | Expand ancestors and scroll to the active file in the tree sidebar |
 
 ## Quick Start
 
@@ -70,7 +107,7 @@ Each MOC auto-generates its own child list. You never maintain these lists by ha
 4. **Add sub-categories** — when creating a note, toggle "Create as MOC". It becomes a sub-category with its own children
 5. **Reorder** — run "Reorder MOC children" to visually drag-and-drop notes into the desired order
 
-> **Tip:** Always use the **"Create new note"** command instead of creating notes manually. The command automatically sets up the `up` link to the parent, assigns the correct `priority`, places the file in the right folder, and applies your note template. This ensures every note is properly connected to the tree from the moment it's created.
+> **Tip:** Use the **"Quick-create child note"** command for the fastest workflow — it auto-detects the parent from context (active MOC or parent of the active note) and only asks for a name. For bulk operations, use **"Batch create children"** to create many notes at once.
 
 ## Maintaining the Note Hierarchy Manually
 
@@ -104,7 +141,9 @@ To turn any note into a MOC (a category node that generates a child list):
 1. Add the `moc` tag: `tags: [moc]`
 2. Run "Create MOC for current note" or "Update MOC" to generate the marker block
 
-Or manually insert a marker block:
+Or use the **"Promote to MOC"** command which does both steps at once. To reverse it, use **"Demote from MOC"** to remove the tag and all marker blocks.
+
+You can also manually insert a marker block:
 
 ```markdown
 %% START MOC list [[Note Name]] %%
@@ -139,7 +178,7 @@ Children within a MOC are sorted by `priority` (ascending), with alphabetical as
 - Set `priority: 10` on the first child, `priority: 20` on the second, etc.
 - Leave gaps (10, 20, 30...) so you can insert notes later without renumbering everything
 
-The **"Reorder MOC children"** command manages this automatically via drag-and-drop.
+The **"Reorder MOC children"** command manages this automatically via drag-and-drop. You can also drag nodes above/below siblings directly in the tree sidebar to adjust priority.
 
 ### Controlling recursion
 
@@ -188,9 +227,9 @@ Everything outside the markers is untouched — add your own text, headings, or 
 
 The plugin reacts to vault changes in real time:
 
-- **Create** — when you create a note via the plugin command, the parent MOC updates immediately
+- **Create** — when you create a note via the plugin command, the parent MOC updates immediately. With auto-assign enabled, notes created outside the plugin also get a parent assigned automatically.
 - **Delete** — when a note is deleted, its parent MOCs are updated to remove the dead link
-- **Rename** — when a note is renamed, parent MOCs regenerate with the new name
+- **Rename** — when a note is renamed, parent MOCs regenerate with the new name. You can also rename directly in the tree sidebar with F2 or double-click.
 - **Modify** — when auto-update is enabled, editing a note triggers a targeted update of its parent MOCs (not the entire vault)
 
 ## MOC Modes
@@ -234,7 +273,16 @@ Click any segment to navigate directly to that ancestor note.
 
 ### Tree sidebar
 
-The **Note Tree sidebar** shows your entire note hierarchy as a collapsible tree. Root MOCs (notes with `#moc` tag and no `up` link) form the top level. Click nodes to expand/collapse, double-click or Ctrl/Cmd-click to navigate.
+The **Note Tree sidebar** shows your entire note hierarchy as a collapsible tree. Root MOCs (notes with `#moc` tag and no `up` link) form the top level.
+
+- **Search** — filter nodes by typing in the search box
+- **Expand/Collapse all** — use the toolbar buttons to expand or collapse the entire tree
+- **Navigate** — click a label to open the note, click the chevron to expand/collapse
+- **Keyboard** — arrow keys to move between nodes, Enter to open, `n` to create a child under a MOC, F2 to rename inline
+- **Drag-and-drop** — drag onto a node to reparent, drag above/below a sibling to reorder
+- **Context menu** — right-click for: open in new tab, create child, add existing child, update MOC, batch create children, promote/demote MOC
+- **Visual indicators** — child count badges, multi-parent `+N` badges, blue dots for recently modified, warning icons for stale MOCs
+- **Stats dashboard** — click "Stats" at the top to see total notes, MOCs, orphans, stale MOCs, max depth, and largest MOC (with clickable actions)
 
 Toggle it via the "Toggle Note Tree sidebar" command or the tree icon in the ribbon.
 
@@ -249,6 +297,10 @@ Toggle it via the "Toggle Note Tree sidebar" command or the tree icon in the rib
 | Default depth | 0 | Default recursion depth (0 = unlimited) |
 | Default sort | priority | Default sort order for MOC entries |
 | Auto-update on save | off | Automatically update parent MOCs on file changes |
+| Auto-detect parent | off | Suggest a parent for new notes created outside the plugin |
+| Auto-assign parent | off | Automatically assign the detected parent (not just suggest) |
+| Auto-reveal active file | off | Highlight the active file in the tree sidebar on switch |
+| Recently modified threshold | 24h | Notes modified within this window show a blue dot in the tree |
 | New note template | (customizable) | Template with variables: `{{date}}`, `{{name}}`, `{{parent}}`, `{{priority}}`, `{{up_line}}`, `{{heading}}`, `{{tags_line}}`, `{{aliases}}` |
 
 ## Installation
@@ -258,7 +310,7 @@ Toggle it via the "Toggle Note Tree sidebar" command or the tree icon in the rib
 The compiled `main.js` is not included in the repository — you need to build it from TypeScript sources:
 
 ```bash
-cd your-vault/.obsidian/plugins/moc-generator
+cd your-vault/.obsidian/plugins/note-tree
 npm install
 npm run build
 ```

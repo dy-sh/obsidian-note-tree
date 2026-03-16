@@ -1,6 +1,34 @@
 import { App, Modal, Setting, SuggestModal, TFile, setIcon, DropdownComponent } from "obsidian";
 import { MocMode, MocParams, NoteInfo, SortBy } from "./types";
 
+// Reusable file suggest modal (moved from main.ts for shared use)
+export class FileSuggestModal extends SuggestModal<TFile> {
+	private files: TFile[];
+	private onChooseCallback: (file: TFile) => void;
+
+	constructor(app: App, files: TFile[], placeholder: string, onChoose: (file: TFile) => void) {
+		super(app);
+		this.files = files;
+		this.onChooseCallback = onChoose;
+		this.setPlaceholder(placeholder);
+	}
+
+	getSuggestions(query: string): TFile[] {
+		if (!query) return this.files;
+		const lower = query.toLowerCase();
+		return this.files.filter((f) => f.basename.toLowerCase().includes(lower));
+	}
+
+	renderSuggestion(file: TFile, el: HTMLElement): void {
+		el.createEl("div", { text: file.basename });
+		el.createEl("small", { text: file.path });
+	}
+
+	onChooseSuggestion(file: TFile): void {
+		this.onChooseCallback(file);
+	}
+}
+
 interface MocOption {
 	mode: MocMode;
 	label: string;
@@ -565,15 +593,19 @@ export class ReorderModal extends Modal {
 export class OrphanListModal extends Modal {
 	private orphans: TFile[];
 	private onAssignParent: (orphan: TFile) => void;
+	private onBulkAssign: (orphans: TFile[]) => void;
+	private selected = new Set<string>();
 
 	constructor(
 		app: App,
 		orphans: TFile[],
-		onAssignParent: (orphan: TFile) => void
+		onAssignParent: (orphan: TFile) => void,
+		onBulkAssign?: (orphans: TFile[]) => void
 	) {
 		super(app);
 		this.orphans = orphans;
 		this.onAssignParent = onAssignParent;
+		this.onBulkAssign = onBulkAssign ?? onAssignParent as any;
 	}
 
 	onOpen() {
@@ -584,6 +616,58 @@ export class OrphanListModal extends Modal {
 			contentEl.createEl("p", { text: "No orphan notes found." });
 			return;
 		}
+
+		// 3.2: Bulk actions bar
+		const actionsBar = contentEl.createDiv({ cls: "moc-orphan-actions" });
+		actionsBar.style.display = "flex";
+		actionsBar.style.gap = "8px";
+		actionsBar.style.marginBottom = "8px";
+		actionsBar.style.alignItems = "center";
+
+		const selectAllCb = actionsBar.createEl("input", { attr: { type: "checkbox" } });
+		const selectLabel = actionsBar.createSpan({ text: "Select all" });
+		selectLabel.style.fontSize = "0.9em";
+		selectLabel.style.color = "var(--text-muted)";
+		selectLabel.style.cursor = "pointer";
+		selectLabel.addEventListener("click", () => {
+			selectAllCb.click();
+		});
+
+		const countLabel = actionsBar.createSpan({ text: "" });
+		countLabel.style.flex = "1";
+		countLabel.style.fontSize = "0.85em";
+		countLabel.style.color = "var(--text-faint)";
+
+		const bulkBtn = actionsBar.createEl("button", { text: "Assign selected to..." });
+		bulkBtn.style.flexShrink = "0";
+		bulkBtn.disabled = true;
+
+		const updateCount = () => {
+			countLabel.textContent = this.selected.size > 0
+				? `${this.selected.size} selected`
+				: "";
+			bulkBtn.disabled = this.selected.size === 0;
+		};
+
+		selectAllCb.addEventListener("change", () => {
+			const checked = selectAllCb.checked;
+			this.selected.clear();
+			if (checked) {
+				for (const o of this.orphans) this.selected.add(o.path);
+			}
+			listEl.querySelectorAll<HTMLInputElement>("input[type=checkbox]").forEach((cb) => {
+				cb.checked = checked;
+			});
+			updateCount();
+		});
+
+		bulkBtn.addEventListener("click", () => {
+			const selectedFiles = this.orphans.filter((o) => this.selected.has(o.path));
+			if (selectedFiles.length > 0) {
+				this.close();
+				this.onBulkAssign(selectedFiles);
+			}
+		});
 
 		const listEl = contentEl.createDiv({ cls: "moc-orphan-list" });
 		listEl.style.maxHeight = "400px";
@@ -596,6 +680,19 @@ export class OrphanListModal extends Modal {
 			row.style.justifyContent = "space-between";
 			row.style.padding = "4px 8px";
 			row.style.borderBottom = "1px solid var(--background-modifier-border)";
+
+			// 3.2: Checkbox
+			const cb = row.createEl("input", { attr: { type: "checkbox" } });
+			cb.style.marginRight = "8px";
+			cb.style.flexShrink = "0";
+			cb.addEventListener("change", () => {
+				if (cb.checked) {
+					this.selected.add(orphan.path);
+				} else {
+					this.selected.delete(orphan.path);
+				}
+				updateCount();
+			});
 
 			const nameEl = row.createSpan({ text: orphan.basename });
 			nameEl.style.flex = "1";
@@ -731,7 +828,7 @@ export class EditMocParamsModal extends Modal {
 	}
 }
 
-class TextInputModal extends Modal {
+export class TextInputModal extends Modal {
 	private title: string;
 	private placeholder: string;
 	private onSubmit: (value: string) => void;
@@ -771,6 +868,74 @@ class TextInputModal extends Modal {
 			btn.setButtonText("Insert").setCta().onClick(() => {
 				this.close();
 				this.onSubmit(inputValue);
+			})
+		);
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+export interface BatchCreateResult {
+	names: string[];
+	isMoc: boolean;
+}
+
+export class BatchCreateModal extends Modal {
+	private onSubmit: (result: BatchCreateResult) => void;
+
+	constructor(app: App, onSubmit: (result: BatchCreateResult) => void) {
+		super(app);
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Batch create child notes" });
+		contentEl.createEl("p", {
+			text: "Enter one note name per line.",
+			cls: "setting-item-description",
+		});
+
+		let rawText = "";
+		let isMoc = false;
+
+		const textarea = contentEl.createEl("textarea", {
+			attr: { rows: "10", placeholder: "Note 1\nNote 2\nNote 3" },
+		});
+		textarea.style.width = "100%";
+		textarea.style.marginBottom = "8px";
+		textarea.style.padding = "8px";
+		textarea.style.fontFamily = "inherit";
+		textarea.style.fontSize = "0.9em";
+		textarea.style.border = "1px solid var(--background-modifier-border)";
+		textarea.style.borderRadius = "4px";
+		textarea.style.background = "var(--background-primary)";
+		textarea.style.color = "var(--text-normal)";
+		textarea.addEventListener("input", () => {
+			rawText = textarea.value;
+		});
+		setTimeout(() => textarea.focus(), 50);
+
+		new Setting(contentEl)
+			.setName("Create as MOC")
+			.setDesc("Add MOC tag to all created notes")
+			.addToggle((toggle) => {
+				toggle.setValue(false).onChange((value) => {
+					isMoc = value;
+				});
+			});
+
+		new Setting(contentEl).addButton((btn) =>
+			btn.setButtonText("Create all").setCta().onClick(() => {
+				const names = rawText
+					.split("\n")
+					.map((s) => s.trim())
+					.filter((s) => s.length > 0);
+				if (names.length === 0) return;
+				this.close();
+				this.onSubmit({ names, isMoc });
 			})
 		);
 	}
