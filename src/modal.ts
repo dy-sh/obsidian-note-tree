@@ -1,0 +1,781 @@
+import { App, Modal, Setting, SuggestModal, TFile, setIcon, DropdownComponent } from "obsidian";
+import { MocMode, MocParams, NoteInfo, SortBy } from "./types";
+
+interface MocOption {
+	mode: MocMode;
+	label: string;
+	description: string;
+}
+
+const MOC_OPTIONS: MocOption[] = [
+	{
+		mode: "list",
+		label: "List",
+		description: "Nested bullet list of child notes (via parent-property links)",
+	},
+	{
+		mode: "embedded",
+		label: "Embedded",
+		description: "Embed full note content with headings",
+	},
+	{
+		mode: "folder",
+		label: "Folder",
+		description: "List all notes in a specific folder",
+	},
+	{
+		mode: "tag",
+		label: "Tag",
+		description: "List all notes with a specific tag",
+	},
+];
+
+export class MocModeSuggestModal extends SuggestModal<MocOption> {
+	private onChooseCallback: (params: MocParams) => void;
+	private defaultDepth: number;
+	private defaultIgnoreBlock: boolean;
+
+	constructor(
+		app: App,
+		defaultDepth: number,
+		defaultIgnoreBlock: boolean,
+		onChoose: (params: MocParams) => void
+	) {
+		super(app);
+		this.defaultDepth = defaultDepth;
+		this.defaultIgnoreBlock = defaultIgnoreBlock;
+		this.onChooseCallback = onChoose;
+		this.setPlaceholder("Select MOC mode");
+	}
+
+	getSuggestions(query: string): MocOption[] {
+		if (!query) return MOC_OPTIONS;
+		const lower = query.toLowerCase();
+		return MOC_OPTIONS.filter(
+			(o) =>
+				o.label.toLowerCase().includes(lower) ||
+				o.description.toLowerCase().includes(lower)
+		);
+	}
+
+	renderSuggestion(option: MocOption, el: HTMLElement): void {
+		el.createEl("div", { text: option.label });
+		el.createEl("small", { text: option.description });
+	}
+
+	onChooseSuggestion(option: MocOption, _evt: MouseEvent | KeyboardEvent): void {
+		if (option.mode === "folder") {
+			new TextInputModal(
+				this.app,
+				"Folder path",
+				"Enter folder path (e.g. Notes/Topics)",
+				(value) => {
+					this.onChooseCallback({
+						mode: "folder",
+						depth: 0,
+						ignoreBlock: false,
+						folderPath: value,
+					});
+				}
+			).open();
+		} else if (option.mode === "tag") {
+			new TextInputModal(
+				this.app,
+				"Tag",
+				"Enter tag (e.g. #topic or topic)",
+				(value) => {
+					this.onChooseCallback({
+						mode: "tag",
+						depth: 0,
+						ignoreBlock: false,
+						tagFilter: value.startsWith("#") ? value : "#" + value,
+					});
+				}
+			).open();
+		} else {
+			this.onChooseCallback({
+				mode: option.mode,
+				depth: this.defaultDepth,
+				ignoreBlock: this.defaultIgnoreBlock,
+			});
+		}
+	}
+}
+
+interface ParentOption {
+	file: TFile | null;
+	label: string;
+	description: string;
+	isSeparator?: boolean;
+}
+
+export class ParentNoteSuggestModal extends SuggestModal<ParentOption> {
+	private options: ParentOption[];
+	private onChooseCallback: (file: TFile | null) => void;
+
+	constructor(
+		app: App,
+		mocFiles: TFile[],
+		otherFiles: TFile[],
+		preselected: TFile | null,
+		onChoose: (file: TFile | null) => void
+	) {
+		super(app);
+		this.onChooseCallback = onChoose;
+		this.setPlaceholder("Select parent note");
+
+		// Build ordered options list
+		this.options = [];
+
+		// "(No parent)" always first
+		this.options.push({
+			file: null,
+			label: "(No parent)",
+			description: "Create a standalone note",
+		});
+
+		// If preselected, put it right after "(No parent)"
+		const preselectedPath = preselected?.path;
+
+		if (preselected) {
+			this.options.push({
+				file: preselected,
+				label: "→ " + preselected.basename,
+				description: preselected.path,
+			});
+		}
+
+		// MOC files (excluding preselected)
+		for (const f of mocFiles) {
+			if (f.path === preselectedPath) continue;
+			this.options.push({
+				file: f,
+				label: f.basename,
+				description: f.path,
+			});
+		}
+
+		// Separator + other files
+		if (otherFiles.length > 0) {
+			this.options.push({
+				file: null,
+				label: "── Other notes ──",
+				description: "",
+				isSeparator: true,
+			});
+			for (const f of otherFiles) {
+				if (f.path === preselectedPath) continue;
+				this.options.push({
+					file: f,
+					label: f.basename,
+					description: f.path,
+				});
+			}
+		}
+	}
+
+	getSuggestions(query: string): ParentOption[] {
+		if (!query) return this.options.filter((o) => !o.isSeparator);
+		const lower = query.toLowerCase();
+		return this.options.filter(
+			(o) =>
+				!o.isSeparator &&
+				(o.label.toLowerCase().includes(lower) ||
+					o.description.toLowerCase().includes(lower))
+		);
+	}
+
+	renderSuggestion(option: ParentOption, el: HTMLElement): void {
+		el.createEl("div", { text: option.label });
+		if (option.description) {
+			el.createEl("small", { text: option.description });
+		}
+	}
+
+	onChooseSuggestion(option: ParentOption, _evt: MouseEvent | KeyboardEvent): void {
+		if (option.isSeparator) return;
+		this.onChooseCallback(option.file);
+	}
+}
+
+export interface NewNoteInfo {
+	name: string;
+	aliases: string;
+	priority: number;
+	isMoc: boolean;
+}
+
+export class CreateNoteModal extends Modal {
+	private defaultPriority: number;
+	private onSubmit: (info: NewNoteInfo) => void;
+
+	constructor(
+		app: App,
+		defaultPriority: number,
+		onSubmit: (info: NewNoteInfo) => void
+	) {
+		super(app);
+		this.defaultPriority = defaultPriority;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Create new note" });
+
+		let name = "";
+		let aliases = "";
+		let priority = this.defaultPriority;
+		let isMoc = false;
+
+		const submit = () => {
+			this.close();
+			this.onSubmit({ name, aliases, priority, isMoc });
+		};
+
+		new Setting(contentEl).setName("Note name").addText((text) => {
+			text.setPlaceholder("Note name").onChange((value) => {
+				name = value;
+			});
+			setTimeout(() => text.inputEl.focus(), 50);
+			text.inputEl.addEventListener("keydown", (e) => {
+				if (e.key === "Enter") {
+					e.preventDefault();
+					submit();
+				}
+			});
+		});
+
+		new Setting(contentEl)
+			.setName("Aliases")
+			.setDesc("Comma-separated")
+			.addText((text) => {
+				text.setPlaceholder("Alias1, Alias2").onChange((value) => {
+					aliases = value;
+				});
+			});
+
+		new Setting(contentEl)
+			.setName("Create as MOC")
+			.setDesc("Add MOC tag to this note")
+			.addToggle((toggle) => {
+				toggle.setValue(false).onChange((value) => {
+					isMoc = value;
+				});
+			});
+
+		new Setting(contentEl).addButton((btn) =>
+			btn
+				.setButtonText("Create")
+				.setCta()
+				.onClick(() => {
+					submit();
+				})
+		);
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+export interface ReorderGroupData {
+	parent: TFile;
+	label: string;
+	items: NoteInfo[];
+}
+
+export class ReorderModal extends Modal {
+	private groups: ReorderGroupData[];
+	private onSave: (groups: ReorderGroupData[]) => void;
+	private scrollEl: HTMLElement | null = null;
+	private dragSource: { groupIdx: number; itemIdx: number } | null = null;
+
+	constructor(
+		app: App,
+		groups: ReorderGroupData[],
+		onSave: (groups: ReorderGroupData[]) => void
+	) {
+		super(app);
+		this.groups = groups.map((g) => ({
+			parent: g.parent,
+			label: g.label,
+			items: [...g.items],
+		}));
+		this.onSave = onSave;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.addClass("moc-reorder-modal");
+		contentEl.createEl("h3", { text: "Reorder MOC children" });
+
+		this.scrollEl = contentEl.createDiv({ cls: "moc-reorder-scroll" });
+		this.renderAll();
+
+		new Setting(contentEl).addButton((btn) =>
+			btn.setButtonText("Save").setCta().onClick(() => {
+				this.close();
+				this.onSave(this.groups);
+			})
+		);
+
+		// Keyboard: Alt+Up / Alt+Down within group
+		contentEl.addEventListener("keydown", (e) => {
+			if (!e.altKey) return;
+			const focused = contentEl.querySelector(
+				".moc-reorder-item:focus"
+			) as HTMLElement;
+			if (!focused) return;
+			const gIdx = parseInt(focused.dataset.group ?? "-1");
+			const iIdx = parseInt(focused.dataset.index ?? "-1");
+			if (gIdx < 0 || iIdx < 0) return;
+			const group = this.groups[gIdx];
+			if (!group) return;
+
+			if (e.key === "ArrowUp" && iIdx > 0) {
+				e.preventDefault();
+				[group.items[iIdx], group.items[iIdx - 1]] = [
+					group.items[iIdx - 1],
+					group.items[iIdx],
+				];
+				this.renderAll();
+				this.focusItem(gIdx, iIdx - 1);
+			} else if (
+				e.key === "ArrowDown" &&
+				iIdx < group.items.length - 1
+			) {
+				e.preventDefault();
+				[group.items[iIdx], group.items[iIdx + 1]] = [
+					group.items[iIdx + 1],
+					group.items[iIdx],
+				];
+				this.renderAll();
+				this.focusItem(gIdx, iIdx + 1);
+			}
+		});
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+
+	private focusItem(groupIdx: number, itemIdx: number) {
+		const el = this.scrollEl?.querySelector(
+			`[data-group="${groupIdx}"][data-index="${itemIdx}"]`
+		) as HTMLElement;
+		el?.focus();
+	}
+
+	private clearAllIndicators() {
+		this.scrollEl
+			?.querySelectorAll(
+				".drag-over-above, .drag-over-below, .drag-over-group"
+			)
+			.forEach((el) => {
+				el.removeClass("drag-over-above");
+				el.removeClass("drag-over-below");
+				el.removeClass("drag-over-group");
+			});
+	}
+
+	private handleDrop(targetGroupIdx: number, targetItemIdx: number) {
+		if (!this.dragSource) return;
+		const { groupIdx: srcGIdx, itemIdx: srcIIdx } = this.dragSource;
+		const srcGroup = this.groups[srcGIdx];
+		const targetGroup = this.groups[targetGroupIdx];
+		if (!srcGroup || !targetGroup) return;
+
+		const [movedItem] = srcGroup.items.splice(srcIIdx, 1);
+
+		let adjustedIdx = targetItemIdx;
+		if (srcGIdx === targetGroupIdx && srcIIdx < targetItemIdx) {
+			adjustedIdx--;
+		}
+
+		targetGroup.items.splice(adjustedIdx, 0, movedItem);
+		this.dragSource = null;
+		this.renderAll();
+	}
+
+	private renderAll() {
+		if (!this.scrollEl) return;
+		this.scrollEl.empty();
+
+		this.groups.forEach((group, groupIdx) => {
+			const groupEl = this.scrollEl!.createDiv({
+				cls: "moc-reorder-group",
+			});
+
+			// Group header
+			const header = groupEl.createDiv({
+				cls: "moc-reorder-group-header",
+			});
+			header.createSpan({ text: group.label });
+			header.createSpan({
+				cls: "moc-reorder-group-count",
+				text: ` (${group.items.length})`,
+			});
+
+			// Group body = drop zone
+			const body = groupEl.createDiv({
+				cls: "moc-reorder-group-body",
+			});
+			body.dataset.group = String(groupIdx);
+
+			if (group.items.length === 0) {
+				body.createDiv({
+					cls: "moc-reorder-empty",
+					text: "Drop items here",
+				});
+			}
+
+			// Drop on group body (for empty groups or dropping at end)
+			body.addEventListener("dragover", (e) => {
+				e.preventDefault();
+				if (!this.dragSource) return;
+				// Only highlight group if not hovering over an item
+				const target = e.target as HTMLElement;
+				if (!target.closest(".moc-reorder-item")) {
+					this.clearAllIndicators();
+					body.addClass("drag-over-group");
+				}
+			});
+
+			body.addEventListener("dragleave", (e) => {
+				if (!body.contains(e.relatedTarget as Node)) {
+					body.removeClass("drag-over-group");
+				}
+			});
+
+			body.addEventListener("drop", (e) => {
+				e.preventDefault();
+				this.clearAllIndicators();
+				// Only handle if not dropped on an item
+				const target = e.target as HTMLElement;
+				if (!target.closest(".moc-reorder-item")) {
+					this.handleDrop(groupIdx, group.items.length);
+				}
+			});
+
+			// Render items
+			group.items.forEach((item, itemIdx) => {
+				const row = body.createDiv({ cls: "moc-reorder-item" });
+				row.setAttribute("tabindex", "0");
+				row.dataset.group = String(groupIdx);
+				row.dataset.index = String(itemIdx);
+				row.draggable = true;
+
+				// Grip
+				const grip = row.createSpan({ cls: "moc-reorder-grip" });
+				setIcon(grip, "grip-vertical");
+
+				// Label
+				row.createSpan({
+					cls: "moc-reorder-label",
+					text: item.file.basename,
+				});
+
+				// Actions
+				const actions = row.createSpan({ cls: "moc-reorder-actions" });
+
+				const btnUp = actions.createEl("button", {
+					cls: "moc-reorder-btn",
+				});
+				setIcon(btnUp, "arrow-up");
+				btnUp.addEventListener("click", (e) => {
+					e.stopPropagation();
+					if (itemIdx > 0) {
+						[group.items[itemIdx], group.items[itemIdx - 1]] = [
+							group.items[itemIdx - 1],
+							group.items[itemIdx],
+						];
+						this.renderAll();
+						this.focusItem(groupIdx, itemIdx - 1);
+					}
+				});
+
+				const btnDown = actions.createEl("button", {
+					cls: "moc-reorder-btn",
+				});
+				setIcon(btnDown, "arrow-down");
+				btnDown.addEventListener("click", (e) => {
+					e.stopPropagation();
+					if (itemIdx < group.items.length - 1) {
+						[group.items[itemIdx], group.items[itemIdx + 1]] = [
+							group.items[itemIdx + 1],
+							group.items[itemIdx],
+						];
+						this.renderAll();
+						this.focusItem(groupIdx, itemIdx + 1);
+					}
+				});
+
+				// Drag start
+				row.addEventListener("dragstart", (e) => {
+					this.dragSource = { groupIdx, itemIdx };
+					row.addClass("is-dragging");
+					e.dataTransfer?.setData(
+						"text/plain",
+						`${groupIdx}:${itemIdx}`
+					);
+				});
+
+				row.addEventListener("dragend", () => {
+					this.dragSource = null;
+					row.removeClass("is-dragging");
+					this.clearAllIndicators();
+				});
+
+				// Drag over item = position indicator
+				row.addEventListener("dragover", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					this.clearAllIndicators();
+					const rect = row.getBoundingClientRect();
+					const mid = rect.top + rect.height / 2;
+					if (e.clientY < mid) {
+						row.addClass("drag-over-above");
+					} else {
+						row.addClass("drag-over-below");
+					}
+				});
+
+				row.addEventListener("dragleave", () => {
+					row.removeClass("drag-over-above");
+					row.removeClass("drag-over-below");
+				});
+
+				// Drop on item
+				row.addEventListener("drop", (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					this.clearAllIndicators();
+					const rect = row.getBoundingClientRect();
+					const mid = rect.top + rect.height / 2;
+					const targetIdx =
+						e.clientY < mid ? itemIdx : itemIdx + 1;
+					this.handleDrop(groupIdx, targetIdx);
+				});
+			});
+		});
+	}
+}
+
+export class OrphanListModal extends Modal {
+	private orphans: TFile[];
+	private onAssignParent: (orphan: TFile) => void;
+
+	constructor(
+		app: App,
+		orphans: TFile[],
+		onAssignParent: (orphan: TFile) => void
+	) {
+		super(app);
+		this.orphans = orphans;
+		this.onAssignParent = onAssignParent;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: `Orphan notes (${this.orphans.length})` });
+
+		if (this.orphans.length === 0) {
+			contentEl.createEl("p", { text: "No orphan notes found." });
+			return;
+		}
+
+		const listEl = contentEl.createDiv({ cls: "moc-orphan-list" });
+		listEl.style.maxHeight = "400px";
+		listEl.style.overflowY = "auto";
+
+		for (const orphan of this.orphans) {
+			const row = listEl.createDiv({ cls: "moc-orphan-item" });
+			row.style.display = "flex";
+			row.style.alignItems = "center";
+			row.style.justifyContent = "space-between";
+			row.style.padding = "4px 8px";
+			row.style.borderBottom = "1px solid var(--background-modifier-border)";
+
+			const nameEl = row.createSpan({ text: orphan.basename });
+			nameEl.style.flex = "1";
+			nameEl.style.overflow = "hidden";
+			nameEl.style.textOverflow = "ellipsis";
+			nameEl.style.whiteSpace = "nowrap";
+			nameEl.style.cursor = "pointer";
+			nameEl.addEventListener("click", () => {
+				this.close();
+				this.app.workspace.getLeaf(false).openFile(orphan);
+			});
+
+			const btn = row.createEl("button", { text: "Assign parent" });
+			btn.style.marginLeft = "8px";
+			btn.style.flexShrink = "0";
+			btn.addEventListener("click", () => {
+				this.close();
+				this.onAssignParent(orphan);
+			});
+		}
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+export class EditMocParamsModal extends Modal {
+	private params: MocParams;
+	private onSave: (params: MocParams) => void;
+
+	constructor(app: App, params: MocParams, onSave: (params: MocParams) => void) {
+		super(app);
+		this.params = { ...params };
+		this.onSave = onSave;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: "Edit MOC parameters" });
+
+		new Setting(contentEl)
+			.setName("Mode")
+			.addDropdown((dd) =>
+				dd
+					.addOptions({
+						list: "List",
+						embedded: "Embedded",
+						folder: "Folder",
+						tag: "Tag",
+					})
+					.setValue(this.params.mode)
+					.onChange((v) => { this.params.mode = v as MocMode; })
+			);
+
+		new Setting(contentEl)
+			.setName("Depth")
+			.setDesc("0 = unlimited")
+			.addText((text) =>
+				text
+					.setValue(String(this.params.depth))
+					.onChange((v) => { this.params.depth = parseInt(v) || 0; })
+			);
+
+		new Setting(contentEl)
+			.setName("Ignore block")
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.params.ignoreBlock)
+					.onChange((v) => { this.params.ignoreBlock = v; })
+			);
+
+		new Setting(contentEl)
+			.setName("Sort")
+			.addDropdown((dd) =>
+				dd
+					.addOptions({
+						"": "(default)",
+						priority: "Priority",
+						alphabetical: "Alphabetical",
+						created: "Created date",
+						modified: "Modified date",
+						custom: "Custom field",
+					})
+					.setValue(this.params.sort ?? "")
+					.onChange((v) => { this.params.sort = v ? v as SortBy : undefined; })
+			);
+
+		new Setting(contentEl)
+			.setName("Include tag")
+			.addText((text) =>
+				text
+					.setValue(this.params.include ?? "")
+					.onChange((v) => { this.params.include = v || undefined; })
+			);
+
+		new Setting(contentEl)
+			.setName("Exclude tag")
+			.addText((text) =>
+				text
+					.setValue(this.params.exclude ?? "")
+					.onChange((v) => { this.params.exclude = v || undefined; })
+			);
+
+		new Setting(contentEl)
+			.setName("Folder path")
+			.setDesc("For folder mode")
+			.addText((text) =>
+				text
+					.setValue(this.params.folderPath ?? "")
+					.onChange((v) => { this.params.folderPath = v || undefined; })
+			);
+
+		new Setting(contentEl)
+			.setName("Tag filter")
+			.setDesc("For tag mode")
+			.addText((text) =>
+				text
+					.setValue(this.params.tagFilter ?? "")
+					.onChange((v) => { this.params.tagFilter = v || undefined; })
+			);
+
+		new Setting(contentEl).addButton((btn) =>
+			btn.setButtonText("Save").setCta().onClick(() => {
+				this.close();
+				this.onSave(this.params);
+			})
+		);
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}
+
+class TextInputModal extends Modal {
+	private title: string;
+	private placeholder: string;
+	private onSubmit: (value: string) => void;
+
+	constructor(
+		app: App,
+		title: string,
+		placeholder: string,
+		onSubmit: (value: string) => void
+	) {
+		super(app);
+		this.title = title;
+		this.placeholder = placeholder;
+		this.onSubmit = onSubmit;
+	}
+
+	onOpen() {
+		const { contentEl } = this;
+		contentEl.createEl("h3", { text: this.title });
+
+		let inputValue = "";
+		new Setting(contentEl).addText((text) => {
+			text.setPlaceholder(this.placeholder).onChange((value) => {
+				inputValue = value;
+			});
+			setTimeout(() => text.inputEl.focus(), 50);
+			text.inputEl.addEventListener("keydown", (e) => {
+				if (e.key === "Enter") {
+					e.preventDefault();
+					this.close();
+					this.onSubmit(inputValue);
+				}
+			});
+		});
+
+		new Setting(contentEl).addButton((btn) =>
+			btn.setButtonText("Insert").setCta().onClick(() => {
+				this.close();
+				this.onSubmit(inputValue);
+			})
+		);
+	}
+
+	onClose() {
+		this.contentEl.empty();
+	}
+}

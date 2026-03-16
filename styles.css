@@ -1,0 +1,171 @@
+.moc-reorder-scroll {
+	max-height: 500px;
+	overflow-y: auto;
+	margin-bottom: 1em;
+}
+
+.moc-reorder-group {
+	margin-bottom: 12px;
+}
+
+.moc-reorder-group-header {
+	font-weight: 600;
+	padding: 4px 8px;
+	margin-bottom: 4px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.moc-reorder-group-count {
+	font-weight: normal;
+}
+
+.moc-reorder-group-body {
+	min-height: 32px;
+	border-radius: 4px;
+	padding: 2px 0;
+}
+
+.moc-reorder-group-body.drag-over-group {
+	background: var(--background-modifier-hover);
+	outline: 2px dashed var(--interactive-accent);
+	outline-offset: -2px;
+}
+
+.moc-reorder-empty {
+	padding: 8px;
+	text-align: center;
+	color: var(--text-faint);
+	font-size: 0.85em;
+}
+
+.moc-reorder-item {
+	display: flex;
+	align-items: center;
+	padding: 6px 8px;
+	border-radius: 4px;
+	margin-bottom: 2px;
+	cursor: default;
+	outline: none;
+}
+
+.moc-reorder-item:hover,
+.moc-reorder-item:focus {
+	background: var(--background-modifier-hover);
+}
+
+.moc-reorder-item.is-dragging {
+	opacity: 0.4;
+}
+
+.moc-reorder-item.drag-over-above {
+	border-top: 2px solid var(--interactive-accent);
+}
+
+.moc-reorder-item.drag-over-below {
+	border-bottom: 2px solid var(--interactive-accent);
+}
+
+.moc-reorder-grip {
+	cursor: grab;
+	margin-right: 8px;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+}
+
+.moc-reorder-label {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.moc-reorder-actions {
+	display: flex;
+	gap: 2px;
+	margin-left: 8px;
+}
+
+.moc-reorder-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 2px;
+	border-radius: 4px;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+}
+
+.moc-reorder-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+/* Breadcrumb */
+.moc-breadcrumb {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.moc-breadcrumb-segment {
+	cursor: pointer;
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
+.moc-breadcrumb-segment:hover {
+	text-decoration: underline;
+	color: var(--text-normal);
+}
+
+.moc-breadcrumb-separator {
+	color: var(--text-faint);
+	margin: 0 2px;
+	font-size: 0.85em;
+}
+
+/* Tree sidebar view */
+.note-tree-view {
+	padding: 8px;
+}
+
+.tree-node {
+	user-select: none;
+}
+
+.tree-node-header {
+	display: flex;
+	align-items: center;
+	padding: 2px 4px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.tree-node-header:hover {
+	background: var(--background-modifier-hover);
+}
+
+.tree-node-icon {
+	display: flex;
+	align-items: center;
+	margin-right: 4px;
+	color: var(--text-muted);
+	width: 16px;
+	flex-shrink: 0;
+}
+
+.tree-node-label {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.9em;
+}
+
+.tree-node-children {
+	padding-left: 16px;
+}

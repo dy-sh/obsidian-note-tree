@@ -1,0 +1,10 @@
+{
+	"id": "note-tree",
+	"name": "Note Tree",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Build a structured hierarchy of notes with auto-generated MOC (Map of Content). Navigate deep via MOC and back via Up links. Create, reorder, and manage note relationships visually.",
+	"author": "Dmitry Savosh",
+	"authorUrl": "https://github.com/dy-sh/",
+	"isDesktopOnly": false
+}
