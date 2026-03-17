@@ -179,6 +179,13 @@ export class MocEngine {
 
 			notes.push({ file: info.file, depth });
 
+			// Depth limits (0 = unlimited)
+			// depth=1 means only direct children (current depth 0), no recursion
+			// depth=2 means children + grandchildren, etc.
+			if (params.depth > 0 && depth + 1 >= params.depth) {
+				continue;
+			}
+
 			// Don't go deeper if non-ignore-block and page has mocBlockTag
 			if (!params.ignoreBlock) {
 				if (
@@ -186,11 +193,6 @@ export class MocEngine {
 				) {
 					continue;
 				}
-			}
-
-			// Depth limits (0 = unlimited)
-			if (params.depth > 0 && depth >= params.depth - 1) {
-				continue;
 			}
 
 			this.listLinksRecursive(
@@ -452,7 +454,6 @@ export class MocEngine {
 		file: TFile,
 		index: Map<string, NoteInfo[]>
 	): Promise<boolean> {
-		await this.addMocTag(file);
 		let text = await this.app.vault.read(file);
 
 		const regex =
@@ -460,6 +461,10 @@ export class MocEngine {
 		const matches = [...text.matchAll(regex)];
 
 		if (matches.length === 0) {
+			// Only add moc tag when creating new markers
+			await this.addMocTag(file);
+			// Re-read after frontmatter modification
+			text = await this.app.vault.read(file);
 			const params: MocParams = {
 				mode: "list",
 				depth: this.settings.defaultDepth,

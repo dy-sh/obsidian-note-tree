@@ -30,6 +30,7 @@ export class NoteTreeView extends ItemView {
 	private host: TreeViewHost;
 	private nodeMap = new Map<string, NodeState>();
 	private focusedPath: string | null = null;
+	private activePath: string | null = null;
 	private searchQuery = "";
 	private treeContainer: HTMLElement | null = null;
 	private searchInput: HTMLInputElement | null = null;
@@ -69,8 +70,21 @@ export class NoteTreeView extends ItemView {
 			this.buildTree();
 		});
 
-		// #5: Collapse/Expand all buttons
+		// Toolbar buttons
 		const btnWrap = searchWrap.createDiv({ cls: "tree-toolbar" });
+
+		// Reveal active file button
+		const revealBtn = btnWrap.createEl("button", {
+			cls: "tree-toolbar-btn",
+			attr: { "aria-label": "Reveal active file" },
+		});
+		setIcon(revealBtn, "crosshair");
+		revealBtn.addEventListener("click", () => {
+			const file = this.app.workspace.getActiveFile();
+			if (file) this.revealFile(file);
+		});
+
+		// Expand all
 		const expandBtn = btnWrap.createEl("button", {
 			cls: "tree-toolbar-btn",
 			attr: { "aria-label": "Expand all" },
@@ -81,6 +95,8 @@ export class NoteTreeView extends ItemView {
 				if (state.hasChildren && !state.expanded) state.toggle(true);
 			}
 		});
+
+		// Collapse all
 		const collapseBtn = btnWrap.createEl("button", {
 			cls: "tree-toolbar-btn",
 			attr: { "aria-label": "Collapse all" },
@@ -103,15 +119,22 @@ export class NoteTreeView extends ItemView {
 			})
 		);
 
-		// Auto-reveal active file
+		// Track active file — always highlight, optionally auto-reveal
 		this.registerEvent(
 			this.app.workspace.on("active-leaf-change", () => {
-				if (this.host.settings.autoRevealInTree) {
-					const file = this.app.workspace.getActiveFile();
-					if (file) this.revealFile(file);
+				const file = this.app.workspace.getActiveFile();
+				this.updateActiveHighlight(file?.path ?? null);
+				if (this.host.settings.autoRevealInTree && file) {
+					this.revealFile(file);
 				}
 			})
 		);
+
+		// Set initial active highlight
+		const initialFile = this.app.workspace.getActiveFile();
+		if (initialFile) {
+			this.activePath = initialFile.path;
+		}
 
 		// Keyboard navigation
 		container.addEventListener("keydown", (e) => this.handleKeydown(e));
@@ -193,6 +216,9 @@ export class NoteTreeView extends ItemView {
 				matchingPaths
 			);
 		}
+
+		// Apply active highlight after all nodes are rendered
+		this.updateActiveHighlight(this.activePath);
 	}
 
 	// #14: Stats section
@@ -746,6 +772,21 @@ export class NoteTreeView extends ItemView {
 		state = this.nodeMap.get(file.path);
 		if (state) {
 			this.highlightNode(state.headerEl);
+		}
+	}
+
+	private updateActiveHighlight(path: string | null): void {
+		// Remove old active class
+		this.treeContainer
+			?.querySelectorAll(".tree-node-active")
+			.forEach((el) => el.removeClass("tree-node-active"));
+
+		this.activePath = path;
+		if (path) {
+			const state = this.nodeMap.get(path);
+			if (state) {
+				state.headerEl.addClass("tree-node-active");
+			}
 		}
 	}
 

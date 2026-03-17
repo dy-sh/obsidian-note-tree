@@ -335,7 +335,17 @@
 	flex-shrink: 0;
 }
 
-/* Highlight for reveal */
+/* Persistent active file highlight */
+.tree-node-header.tree-node-active {
+	background: hsla(var(--interactive-accent-hsl), 0.15);
+}
+
+.tree-node-header.tree-node-active .tree-node-label {
+	color: var(--interactive-accent);
+	font-weight: 600;
+}
+
+/* Temporary highlight for reveal */
 .tree-node-highlighted {
 	background: var(--background-modifier-hover);
 	animation: tree-highlight-fade 2s ease-out;
