@@ -1139,14 +1139,14 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 	}
 
 	private serializeParams(params: MocParams): string {
-		const parts: string[] = [params.mode];
-		if (params.depth > 0) parts.push(`depth=${params.depth}`);
-		if (params.ignoreBlock) parts.push("ignore-block");
-		if (params.sort) parts.push(`sort=${params.sort}`);
-		if (params.include) parts.push(`include=${params.include}`);
-		if (params.exclude) parts.push(`exclude=${params.exclude}`);
-		if (params.folderPath) parts.push(`path=${params.folderPath}`);
-		if (params.tagFilter) parts.push(`tag=${params.tagFilter}`);
+		const parts: string[] = [params.mode.toUpperCase()];
+		if (params.depth > 0) parts.push(`DEPTH=${params.depth}`);
+		if (params.ignoreBlock) parts.push("IGNORE-BLOCK");
+		if (params.sort) parts.push(`SORT=${params.sort.toUpperCase()}`);
+		if (params.include) parts.push(`INCLUDE=${params.include}`);
+		if (params.exclude) parts.push(`EXCLUDE=${params.exclude}`);
+		if (params.folderPath) parts.push(`PATH=${params.folderPath}`);
+		if (params.tagFilter) parts.push(`TAG=${params.tagFilter}`);
 		return parts.join(" ");
 	}
 

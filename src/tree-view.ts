@@ -36,6 +36,7 @@ export class NoteTreeView extends ItemView {
 	private searchInput: HTMLInputElement | null = null;
 	private staleCache = new Map<string, boolean>();
 	private dragSourcePath: string | null = null;
+	private lastTreeFingerprint: string = "";
 
 	constructor(leaf: WorkspaceLeaf, host: TreeViewHost) {
 		super(leaf);
@@ -144,10 +145,37 @@ export class NoteTreeView extends ItemView {
 
 	private rebuildDebounced(): void {
 		if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
-		this.rebuildTimer = setTimeout(() => {
+		this.rebuildTimer = setTimeout(async () => {
 			this.staleCache.clear();
+
+			// Compute a fingerprint of the tree structure to avoid unnecessary DOM rebuilds
+			const fingerprint = await this.computeTreeFingerprint();
+			if (fingerprint === this.lastTreeFingerprint) return;
+
 			this.buildTree();
 		}, 1000);
+	}
+
+	private async computeTreeFingerprint(): Promise<string> {
+		const allFiles = this.app.vault.getMarkdownFiles();
+		const roots: string[] = [];
+		for (const f of allFiles) {
+			if (this.host.engine.checkTagExist(f, this.host.settings.mocTag)) {
+				const parents = await this.host.engine.getParentFiles(f);
+				if (parents.length === 0) {
+					roots.push(f.path);
+				}
+			}
+		}
+		roots.sort();
+
+		const index = await this.host.engine.getIndex();
+		const parts: string[] = roots;
+		for (const [parentPath, children] of index) {
+			const childPaths = children.map(c => c.file.path).sort().join(",");
+			parts.push(`${parentPath}:${childPaths}`);
+		}
+		return parts.join("|");
 	}
 
 	private async buildTree(): Promise<void> {
@@ -219,6 +247,9 @@ export class NoteTreeView extends ItemView {
 
 		// Apply active highlight after all nodes are rendered
 		this.updateActiveHighlight(this.activePath);
+
+		// Update fingerprint so debounced rebuilds can detect structural changes
+		this.lastTreeFingerprint = await this.computeTreeFingerprint();
 	}
 
 	// #14: Stats section

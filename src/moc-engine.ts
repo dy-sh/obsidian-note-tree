@@ -286,14 +286,14 @@ export class MocEngine {
 
 	// 1a: new marker format with serialization
 	private serializeMarkerParams(params: MocParams): string {
-		const parts: string[] = [params.mode];
-		if (params.depth > 0) parts.push(`depth=${params.depth}`);
-		if (params.ignoreBlock) parts.push("ignore-block");
-		if (params.sort) parts.push(`sort=${params.sort}`);
-		if (params.include) parts.push(`include=${params.include}`);
-		if (params.exclude) parts.push(`exclude=${params.exclude}`);
-		if (params.folderPath) parts.push(`path=${params.folderPath}`);
-		if (params.tagFilter) parts.push(`tag=${params.tagFilter}`);
+		const parts: string[] = [params.mode.toUpperCase()];
+		if (params.depth > 0) parts.push(`DEPTH=${params.depth}`);
+		if (params.ignoreBlock) parts.push("IGNORE-BLOCK");
+		if (params.sort) parts.push(`SORT=${params.sort.toUpperCase()}`);
+		if (params.include) parts.push(`INCLUDE=${params.include}`);
+		if (params.exclude) parts.push(`EXCLUDE=${params.exclude}`);
+		if (params.folderPath) parts.push(`PATH=${params.folderPath}`);
+		if (params.tagFilter) parts.push(`TAG=${params.tagFilter}`);
 		return parts.join(" ");
 	}
 
@@ -302,9 +302,8 @@ export class MocEngine {
 		const tokens = raw.trim().split(/\s+/);
 		const first = tokens[0];
 
-		// Backward compat: old-style types
+		// Backward compat: old-style compound types (with underscore)
 		const legacyMap: Record<string, MocParams> = {
-			LIST: { mode: "list", depth: 0, ignoreBlock: false },
 			LIST_IGNORE_BLOCK: { mode: "list", depth: 0, ignoreBlock: true },
 			LIST_1: { mode: "list", depth: 1, ignoreBlock: false },
 			LIST_1_IGNORE_BLOCK: {
@@ -324,7 +323,6 @@ export class MocEngine {
 				depth: 3,
 				ignoreBlock: true,
 			},
-			EMBEDDED: { mode: "embedded", depth: 0, ignoreBlock: false },
 		};
 
 		if (first in legacyMap) {
@@ -333,27 +331,27 @@ export class MocEngine {
 
 		// New format
 		const params: MocParams = {
-			mode: (first as MocMode) || "list",
+			mode: (first.toLowerCase() as MocMode) || "list",
 			depth: 0,
 			ignoreBlock: false,
 		};
 
 		for (let i = 1; i < tokens.length; i++) {
-			const token = tokens[i];
-			if (token === "ignore-block") {
+			const lower = tokens[i].toLowerCase();
+			if (lower === "ignore-block") {
 				params.ignoreBlock = true;
-			} else if (token.startsWith("depth=")) {
-				params.depth = parseInt(token.slice(6)) || 0;
-			} else if (token.startsWith("sort=")) {
-				params.sort = token.slice(5) as SortBy;
-			} else if (token.startsWith("include=")) {
-				params.include = token.slice(8);
-			} else if (token.startsWith("exclude=")) {
-				params.exclude = token.slice(8);
-			} else if (token.startsWith("path=")) {
-				params.folderPath = token.slice(5);
-			} else if (token.startsWith("tag=")) {
-				params.tagFilter = token.slice(4);
+			} else if (lower.startsWith("depth=")) {
+				params.depth = parseInt(lower.slice(6)) || 0;
+			} else if (lower.startsWith("sort=")) {
+				params.sort = lower.slice(5) as SortBy;
+			} else if (lower.startsWith("include=")) {
+				params.include = tokens[i].slice(8);
+			} else if (lower.startsWith("exclude=")) {
+				params.exclude = tokens[i].slice(8);
+			} else if (lower.startsWith("path=")) {
+				params.folderPath = tokens[i].slice(5);
+			} else if (lower.startsWith("tag=")) {
+				params.tagFilter = tokens[i].slice(4);
 			}
 		}
 
