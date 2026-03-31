@@ -37,6 +37,7 @@ export class NoteTreeView extends ItemView {
 	private staleCache = new Map<string, boolean>();
 	private dragSourcePath: string | null = null;
 	private lastTreeFingerprint: string = "";
+	private fingerprintDirty = false;
 
 	constructor(leaf: WorkspaceLeaf, host: TreeViewHost) {
 		super(leaf);
@@ -150,10 +151,16 @@ export class NoteTreeView extends ItemView {
 
 			// Compute a fingerprint of the tree structure to avoid unnecessary DOM rebuilds
 			const fingerprint = await this.computeTreeFingerprint();
-			if (fingerprint === this.lastTreeFingerprint) return;
+			if (fingerprint === this.lastTreeFingerprint && !this.fingerprintDirty) return;
+			this.fingerprintDirty = false;
 
 			this.buildTree();
 		}, 1000);
+	}
+
+	/** Force the next debounced rebuild to proceed regardless of fingerprint. */
+	invalidateFingerprint(): void {
+		this.fingerprintDirty = true;
 	}
 
 	private async computeTreeFingerprint(): Promise<string> {

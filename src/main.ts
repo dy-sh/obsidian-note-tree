@@ -99,6 +99,7 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 
 				const success = await this.engine.updateMoc(file);
 				if (success) {
+					this.invalidateTreeFingerprint();
 					new Notice("MOC updated in " + file.basename);
 				} else {
 					new Notice("No MOC markers found in " + file.basename);
@@ -112,6 +113,7 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 			callback: async () => {
 				new Notice("Updating MOCs...", 5000);
 				const count = await this.engine.updateAllMocs();
+				this.invalidateTreeFingerprint();
 				new Notice("MOC updated in " + count + " files", 5000);
 			},
 		});
@@ -958,6 +960,7 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 								}
 							}
 						}
+					this.invalidateTreeFingerprint();
 					} finally {
 						this.isUpdating = false;
 					}
@@ -1041,9 +1044,18 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 		}).open();
 	}
 
+	/** Tell the tree view to rebuild on the next debounced cycle. */
+	private invalidateTreeFingerprint(): void {
+		const leaves = this.app.workspace.getLeavesOfType(NOTE_TREE_VIEW_TYPE);
+		if (leaves.length > 0) {
+			(leaves[0].view as NoteTreeView).invalidateFingerprint();
+		}
+	}
+
 	// #4: TreeViewHost: update MOC
 	async updateMoc(file: TFile): Promise<void> {
 		await this.engine.updateMoc(file);
+		this.invalidateTreeFingerprint();
 		new Notice("MOC updated: " + file.basename);
 	}
 
@@ -1052,6 +1064,7 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 		await this.engine.addMocTag(file);
 		await this.engine.updateMoc(file);
 		this.engine.invalidateCache();
+		this.invalidateTreeFingerprint();
 		new Notice("Promoted to MOC: " + file.basename);
 	}
 
@@ -1060,6 +1073,7 @@ export default class MocGeneratorPlugin extends Plugin implements TreeViewHost {
 		await this.engine.removeMocTag(file);
 		await this.engine.removeMocMarkers(file);
 		this.engine.invalidateCache();
+		this.invalidateTreeFingerprint();
 		new Notice("Demoted from MOC: " + file.basename);
 	}
 
