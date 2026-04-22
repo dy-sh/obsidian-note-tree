@@ -1,6 +1,6 @@
 {
 	"name": "note-tree",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Build a structured hierarchy of notes with auto-generated MOC for Obsidian",
 	"main": "main.js",
 	"scripts": {
